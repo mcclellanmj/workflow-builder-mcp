@@ -1,0 +1,45 @@
+# Deno & Dependencies
+.deno/
+cov_profile/
+coverage/
+node_modules/
+npm/
+
+# Generated Test Artifacts
+*test_workflow_interactive_visualizer.html
+workflow_*_visualizer.html
+*.tmp
+*.temp
+
+# Environment & Secrets
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.cert
+
+# Operating System Files
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*~
+
+# IDEs & Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-project
+*.sublime-workspace
+
+# Logs & Diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
