@@ -329,6 +329,9 @@ Deno.test("visualizeWorkflowTool - exports interactive HTML with subworkflows, p
     assert(htmlContent.includes("Extract JSON documents from raw payloads"));
     assert(htmlContent.includes("insp-drilldown-btn"));
     assert(htmlContent.includes("insp-prompt"));
+    assert(htmlContent.includes("lock-toggle-btn"));
+    assert(htmlContent.includes("nodesLocked"));
+    assert(htmlContent.includes("autoungrabify"));
   } finally {
     try {
       await Deno.remove(testHtmlFile);

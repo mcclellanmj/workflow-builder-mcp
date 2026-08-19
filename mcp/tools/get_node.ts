@@ -20,7 +20,7 @@ const GetNodeSchema = z.object({
 export const getNodeTool = defineTool({
   name: "node_get",
   description:
-    "Gets full details of a single node in a workflow, including all connected inbound and outbound edges. When an executionId is provided, status/output/error/iteration fields reflect that specific concurrent run's state.",
+    "Gets full details of a single node in a workflow, including all connected inbound and outbound edges. When an executionId is provided, status/error/iteration fields reflect that specific concurrent run's state.",
   schema: GetNodeSchema,
   execute: async ({ workflowId, nodeId, executionId }) => {
     const nodeCheck = await requireNode(workflowId, nodeId);

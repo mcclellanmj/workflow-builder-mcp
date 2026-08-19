@@ -3,7 +3,7 @@
  *
  * Produces a self-contained, interactive HTML document allowing users to:
  * - Visually inspect workflow and subworkflow graphs (pan/zoom/fit/layout toggle).
- * - Click any node to view full prompts, instructions, configs, outputs, and loop iteration history in an inspector drawer.
+ * - Click any node to view full prompts, instructions, configs, and loop iteration history in an inspector drawer.
  * - Drill down into subworkflows with dynamic breadcrumb navigation.
  * - Search nodes by name/prompt and filter by execution status.
  */
@@ -551,11 +551,6 @@ export function generateInteractiveHtml(options: HtmlVisualizerOptions): string 
             <div class="error-content" id="insp-error"></div>
           </div>
 
-          <div id="insp-output-wrap" style="display: none;">
-            <div style="font-size: 0.75rem; color: #34d399; font-weight: 600; margin-bottom: 4px;">Output:</div>
-            <div class="output-content" id="insp-output"></div>
-          </div>
-
           <!-- Iteration History Timeline -->
           <div id="insp-history-wrap" style="display: none; margin-top: 10px;">
             <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Past Iteration History</div>
@@ -828,17 +823,6 @@ ${serializedData}
           }
         }
 
-        const outWrap = document.getElementById('insp-output-wrap');
-        const outEl = document.getElementById('insp-output');
-        if (outWrap && outEl) {
-          if (nodeData.output) {
-            outWrap.style.display = 'block';
-            outEl.textContent = nodeData.output;
-          } else {
-            outWrap.style.display = 'none';
-          }
-        }
-
         const histWrap = document.getElementById('insp-history-wrap');
         const histList = document.getElementById('insp-history-list');
         if (histWrap && histList) {
@@ -850,8 +834,7 @@ ${serializedData}
               div.className = 'iteration-item';
               const timeStr = rec.completedAt ? ' (' + rec.completedAt.slice(11, 19) + ')' : '';
               const errHtml = rec.error ? '<div class="error-content" style="padding: 4px 8px; font-size: 0.75rem;">' + escapeHtml(rec.error) + '</div>' : '';
-              const outHtml = rec.output ? '<div class="output-content" style="padding: 4px 8px; font-size: 0.75rem;">' + escapeHtml(rec.output) + '</div>' : '';
-              div.innerHTML = '<span class="iteration-badge">Iteration ' + rec.iteration + timeStr + '</span>' + errHtml + outHtml;
+              div.innerHTML = '<span class="iteration-badge">Iteration ' + rec.iteration + timeStr + '</span>' + errHtml;
               histList.appendChild(div);
             });
           } else {
@@ -922,11 +905,27 @@ ${serializedData}
           cy.destroy();
         }
 
+        function applyLockState(cyInstance) {
+          const inst = cyInstance || cy;
+          if (!inst) return;
+          if (nodesLocked) {
+            inst.nodes().lock();
+            inst.nodes().ungrabify();
+            inst.autolock(true);
+            inst.autoungrabify(true);
+          } else {
+            inst.nodes().unlock();
+            inst.nodes().grabify();
+            inst.autolock(false);
+            inst.autoungrabify(false);
+          }
+        }
+
         cy = cytoscape({
           container: document.getElementById('cy'),
           elements: elements,
           boxSelectionEnabled: false,
-          autoungrabify: nodesLocked,
+          autoungrabify: true,
           userPanningEnabled: true,
           userZoomingEnabled: true,
           style: [
@@ -1041,14 +1040,27 @@ ${serializedData}
             rankDir: layoutDirection,
             nodeSep: 60,
             rankSep: 80,
-            padding: 40
+            padding: 40,
+            stop: function(e) {
+              const inst = (e && e.cy) || (this && this.cy) || cy;
+              applyLockState(inst);
+            }
           }
         });
 
-        if (nodesLocked) {
-          cy.nodes().ungrabify();
-          cy.autoungrabify(true);
-        }
+        // Ensure lock state is applied immediately upon creation & layout completion
+        applyLockState(cy);
+        cy.on('layoutstop', function(e) {
+          applyLockState(e?.cy || cy);
+        });
+
+        // Prevent any dragging when locked
+        cy.on('grab drag', 'node', function(evt) {
+          if (nodesLocked) {
+            evt.target.lock();
+            evt.target.ungrabify();
+          }
+        });
 
         function handleNodeSelect(node) {
           if (!node) return;
@@ -1060,22 +1072,28 @@ ${serializedData}
           }
         }
 
-        // Click / tap handler on nodes
-        cy.on('tap', 'node', function(evt) {
-          handleNodeSelect(evt.target);
-        });
+        // Click / tap / select handler on nodes
+        let lastTapTime = 0;
+        let lastTapNodeId = null;
 
-        // Double click on subworkflow nodes to drill down
-        let lastTap = 0;
         cy.on('tap', 'node', function(evt) {
+          const node = evt.target;
+          const raw = node.data('rawNode');
           const now = Date.now();
-          if (now - lastTap < 350) {
-            const raw = evt.target.data('rawNode');
-            if (raw && raw.type === 'subworkflow' && raw.config?.childWorkflowId) {
+
+          handleNodeSelect(node);
+
+          if (raw && raw.type === 'subworkflow' && raw.config?.childWorkflowId) {
+            if (lastTapNodeId === node.id() && (now - lastTapTime) < 350) {
               drillDownIntoSubworkflow(raw.config.childWorkflowId);
             }
           }
-          lastTap = now;
+          lastTapTime = now;
+          lastTapNodeId = node.id();
+        });
+
+        cy.on('select', 'node', function(evt) {
+          handleNodeSelect(evt.target);
         });
 
         // Click background to close inspector
@@ -1119,10 +1137,14 @@ ${serializedData}
         nodesLocked = !nodesLocked;
         if (cy) {
           if (nodesLocked) {
+            cy.nodes().lock();
             cy.nodes().ungrabify();
+            cy.autolock(true);
             cy.autoungrabify(true);
           } else {
+            cy.nodes().unlock();
             cy.nodes().grabify();
+            cy.autolock(false);
             cy.autoungrabify(false);
           }
         }
@@ -1146,12 +1168,23 @@ ${serializedData}
         layoutDirection = layoutDirection === 'TB' ? 'LR' : 'TB';
         document.getElementById('layout-dir-label').textContent = layoutDirection;
         if (cy) {
+          cy.nodes().unlock();
+          cy.autolock(false);
           cy.layout({
             name: 'dagre',
             rankDir: layoutDirection,
             nodeSep: 60,
             rankSep: 80,
-            padding: 40
+            padding: 40,
+            stop: function(e) {
+              const inst = (e && e.cy) || (this && this.cy) || cy;
+              if (nodesLocked && inst) {
+                inst.nodes().lock();
+                inst.nodes().ungrabify();
+                inst.autolock(true);
+                inst.autoungrabify(true);
+              }
+            }
           }).run();
         }
       };

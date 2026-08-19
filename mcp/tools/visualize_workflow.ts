@@ -97,7 +97,7 @@ export const visualizeWorkflowTool = defineTool({
       md += `> **Total Nodes**: ${totalNodes} | **Subworkflows Bundled**: ${totalSubworkflows}\n\n`;
       md += `💡 **Interactive Features Available in Browser**:\n`;
       md +=
-        `- 🔍 **Click any node** to inspect full prompts, agent instructions, configs, outputs, and loop iteration history.\n`;
+        `- 🔍 **Click any node** to inspect full prompts, agent instructions, configs, and loop iteration history.\n`;
       md +=
         `- 📦 **Double-click subworkflows** or click "Drill Down" to inspect child graphs with breadcrumbs.\n`;
       md +=

@@ -108,3 +108,89 @@ Deno.test("Rich Formatting - Format Modes and MCP Annotations", async () => {
     kv.close();
   }
 });
+
+Deno.test("Rich Formatting - Sub-Agent Instructions in workflow_start and workflow_next", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const createRes = await createWorkflowTool.execute({
+      name: "Subagent Test Flow",
+      description: "Tests sub-agent instruction markdown callout",
+    });
+    const { workflow, startNode } = JSON.parse(createRes.content[0].text);
+    const workflowId = workflow.id;
+
+    const stepRes = await addNodeTool.execute({
+      workflowId,
+      type: "step",
+      name: "Deep Analysis",
+      description: "Analyze entire codebase for performance bottlenecks",
+      runInSubAgent: true,
+    });
+    const stepNode = JSON.parse(stepRes.content[0].text);
+
+    const endRes = await addNodeTool.execute({
+      workflowId,
+      type: "end",
+      name: "Complete",
+      description: "End",
+    });
+    const endNode = JSON.parse(endRes.content[0].text);
+
+    await connectNodesTool.execute({ workflowId, fromNodeId: startNode.id, toNodeId: stepNode.id });
+    await connectNodesTool.execute({ workflowId, fromNodeId: stepNode.id, toNodeId: endNode.id });
+
+    // 1. Verify workflow_start includes sub-agent markdown callout
+    const startRes = await startWorkflowTool.execute({ workflowId, format: "markdown" });
+    assert(!startRes.isError);
+    const startText = startRes.content[0].text;
+    assert(startText.includes("Sub-Agent Execution Required"));
+    assert(startText.includes("Deep Analysis"));
+    assert(startText.includes("Delegate this task to a sub-agent or child agent"));
+    assert(startText.includes("runInSubAgent: true"));
+
+    // 2. Start execution to get executionId
+    const startBoth = await startWorkflowTool.execute({ workflowId, format: "json" });
+    const parsedStart = JSON.parse(startBoth.content[0].text);
+    assert(typeof parsedStart.executionId === "string");
+
+    // 3. Reset and step through to check workflow_next with subagent node as next step
+    // Create another step before subagent to test workflow_next outputting subagent node
+    const preStepRes = await addNodeTool.execute({
+      workflowId,
+      type: "step",
+      name: "Setup Environment",
+      description: "Prepare dependencies",
+    });
+    const preStepNode = JSON.parse(preStepRes.content[0].text);
+
+    await connectNodesTool.execute({
+      workflowId,
+      fromNodeId: startNode.id,
+      toNodeId: preStepNode.id,
+    });
+    await connectNodesTool.execute({
+      workflowId,
+      fromNodeId: preStepNode.id,
+      toNodeId: stepNode.id,
+    });
+
+    const start2 = await startWorkflowTool.execute({ workflowId, format: "json" });
+    const exec2 = JSON.parse(start2.content[0].text).executionId;
+
+    const nextRes = await getNextStepTool.execute({
+      executionId: exec2,
+      nodeId: preStepNode.id,
+      status: "completed",
+      format: "markdown",
+    });
+    assert(!nextRes.isError);
+    const nextText = nextRes.content[0].text;
+    assert(nextText.includes("Sub-Agent Execution Required"));
+    assert(nextText.includes("Deep Analysis"));
+    assert(nextText.includes("Delegate this task to a sub-agent or child agent"));
+  } finally {
+    kv.close();
+  }
+});

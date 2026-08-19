@@ -1,14 +1,15 @@
 /**
  * Deno KV persistence layer for workflows, nodes, edges, and execution run instances.
- *
- * Key structure:
- *   ["workflows", workflowId]                      → Workflow
- *   ["nodes", workflowId, nodeId]                  → WorkflowNode
- *   ["edges", workflowId, edgeId]                  → WorkflowEdge
- *   ["executions", executionId]                    → WorkflowExecution
- *   ["executions_by_workflow", workflowId, execId] → executionId (index for cleanup)
+ * All records are user-scoped:
+ *   ["users", userId, "workflows", workflowId]                      → Workflow
+ *   ["users", userId, "nodes", workflowId, nodeId]                  → WorkflowNode
+ *   ["users", userId, "edges", workflowId, edgeId]                  → WorkflowEdge
+ *   ["users", userId, "executions", executionId]                    → WorkflowExecution
+ *   ["users", userId, "executions_by_workflow", workflowId, execId] → executionId (index for cleanup)
+ *   ["users", userId, "subworkflow_refs", childId, workflowId, nodeId] → true
  */
 
+import { getCurrentUserId } from "../auth/context.ts";
 import type {
   EdgeId,
   ExecutionId,
@@ -39,8 +40,16 @@ export function setKv(kv: Deno.Kv): void {
   _kv = kv;
 }
 
+/** Resolves the target userId, defaulting to the current async context or default local user. */
+export function resolveUserId(explicitUserId?: string): string {
+  return (explicitUserId && explicitUserId.trim().length > 0)
+    ? explicitUserId.trim()
+    : getCurrentUserId();
+}
+
 export interface ListOptions {
   limit?: number;
+  userId?: string;
 }
 
 async function listEntries<T>(prefix: Deno.KvKey, options?: ListOptions): Promise<T[]> {
@@ -57,24 +66,29 @@ async function listEntries<T>(prefix: Deno.KvKey, options?: ListOptions): Promis
 // Workflows
 // ---------------------------------------------------------------------------
 
-export async function saveWorkflow(workflow: Workflow): Promise<void> {
+export async function saveWorkflow(workflow: Workflow, userId?: string): Promise<void> {
+  const uid = resolveUserId(userId || workflow.userId);
+  workflow.userId = uid;
   const kv = await getKv();
-  await kv.set(["workflows", workflow.id], workflow);
+  await kv.set(["users", uid, "workflows", workflow.id], workflow);
 }
 
-export async function getWorkflow(id: WorkflowId): Promise<Workflow | null> {
+export async function getWorkflow(id: WorkflowId, userId?: string): Promise<Workflow | null> {
+  const uid = resolveUserId(userId);
   const kv = await getKv();
-  const entry = await kv.get<Workflow>(["workflows", id]);
+  const entry = await kv.get<Workflow>(["users", uid, "workflows", id]);
   return entry.value;
 }
 
 export function listWorkflows(options?: ListOptions): Promise<Workflow[]> {
-  return listEntries<Workflow>(["workflows"], options);
+  const uid = resolveUserId(options?.userId);
+  return listEntries<Workflow>(["users", uid, "workflows"], options);
 }
 
 const MAX_ATOMIC_OPS = 500;
 
-export async function deleteWorkflow(id: WorkflowId): Promise<void> {
+export async function deleteWorkflow(id: WorkflowId, userId?: string): Promise<void> {
+  const uid = resolveUserId(userId);
   const kv = await getKv();
   let atomic = kv.atomic();
   let opCount = 0;
@@ -88,7 +102,7 @@ export async function deleteWorkflow(id: WorkflowId): Promise<void> {
   };
 
   // Delete all nodes belonging to this workflow (and any subworkflow index refs)
-  for await (const entry of kv.list<WorkflowNode>({ prefix: ["nodes", id] })) {
+  for await (const entry of kv.list<WorkflowNode>({ prefix: ["users", uid, "nodes", id] })) {
     atomic.delete(entry.key);
     opCount++;
     if (
@@ -96,7 +110,7 @@ export async function deleteWorkflow(id: WorkflowId): Promise<void> {
     ) {
       const childId = (entry.value.config.childWorkflowId as string).trim();
       if (childId) {
-        atomic.delete(["subworkflow_refs", childId, id, entry.value.id]);
+        atomic.delete(["users", uid, "subworkflow_refs", childId, id, entry.value.id]);
         opCount++;
       }
     }
@@ -106,7 +120,7 @@ export async function deleteWorkflow(id: WorkflowId): Promise<void> {
   }
 
   // Delete all edges belonging to this workflow
-  for await (const entry of kv.list({ prefix: ["edges", id] })) {
+  for await (const entry of kv.list({ prefix: ["users", uid, "edges", id] })) {
     atomic.delete(entry.key);
     opCount++;
     if (opCount >= MAX_ATOMIC_OPS) {
@@ -115,9 +129,11 @@ export async function deleteWorkflow(id: WorkflowId): Promise<void> {
   }
 
   // Delete all executions belonging to this workflow (via the by-workflow index)
-  for await (const entry of kv.list<string>({ prefix: ["executions_by_workflow", id] })) {
+  for await (
+    const entry of kv.list<string>({ prefix: ["users", uid, "executions_by_workflow", id] })
+  ) {
     const executionId = entry.value;
-    atomic.delete(["executions", executionId]);
+    atomic.delete(["users", uid, "executions", executionId]);
     atomic.delete(entry.key);
     opCount += 2;
     if (opCount >= MAX_ATOMIC_OPS) {
@@ -126,7 +142,7 @@ export async function deleteWorkflow(id: WorkflowId): Promise<void> {
   }
 
   // Delete the workflow itself
-  atomic.delete(["workflows", id]);
+  atomic.delete(["users", uid, "workflows", id]);
   opCount++;
   await commitBatch();
 }
@@ -135,31 +151,35 @@ export async function deleteWorkflow(id: WorkflowId): Promise<void> {
 // Nodes
 // ---------------------------------------------------------------------------
 
-export async function saveNode(node: WorkflowNode): Promise<void> {
+export async function saveNode(node: WorkflowNode, userId?: string): Promise<void> {
+  const uid = resolveUserId(userId || node.userId);
+  node.userId = uid;
   const kv = await getKv();
-  const atomic = kv.atomic().set(["nodes", node.workflowId, node.id], node);
+  const atomic = kv.atomic().set(["users", uid, "nodes", node.workflowId, node.id], node);
   if (node.type === "subworkflow" && typeof node.config?.childWorkflowId === "string") {
     const childId = (node.config.childWorkflowId as string).trim();
     if (childId) {
-      atomic.set(["subworkflow_refs", childId, node.workflowId, node.id], true);
+      atomic.set(["users", uid, "subworkflow_refs", childId, node.workflowId, node.id], true);
     }
   }
   await atomic.commit();
 }
 
-export async function saveNodes(nodes: WorkflowNode[]): Promise<void> {
+export async function saveNodes(nodes: WorkflowNode[], userId?: string): Promise<void> {
   if (nodes.length === 0) return;
   const kv = await getKv();
   let atomic = kv.atomic();
   let opCount = 0;
 
   for (const node of nodes) {
-    atomic.set(["nodes", node.workflowId, node.id], node);
+    const uid = resolveUserId(userId || node.userId);
+    node.userId = uid;
+    atomic.set(["users", uid, "nodes", node.workflowId, node.id], node);
     opCount++;
     if (node.type === "subworkflow" && typeof node.config?.childWorkflowId === "string") {
       const childId = (node.config.childWorkflowId as string).trim();
       if (childId) {
-        atomic.set(["subworkflow_refs", childId, node.workflowId, node.id], true);
+        atomic.set(["users", uid, "subworkflow_refs", childId, node.workflowId, node.id], true);
         opCount++;
       }
     }
@@ -178,9 +198,11 @@ export async function saveNodes(nodes: WorkflowNode[]): Promise<void> {
 export async function getNode(
   workflowId: WorkflowId,
   nodeId: string,
+  userId?: string,
 ): Promise<WorkflowNode | null> {
+  const uid = resolveUserId(userId);
   const kv = await getKv();
-  const entry = await kv.get<WorkflowNode>(["nodes", workflowId, nodeId]);
+  const entry = await kv.get<WorkflowNode>(["users", uid, "nodes", workflowId, nodeId]);
   return entry.value;
 }
 
@@ -188,48 +210,62 @@ export function listNodes(
   workflowId: WorkflowId,
   options?: ListOptions,
 ): Promise<WorkflowNode[]> {
-  return listEntries<WorkflowNode>(["nodes", workflowId], options);
+  const uid = resolveUserId(options?.userId);
+  return listEntries<WorkflowNode>(["users", uid, "nodes", workflowId], options);
 }
 
-export async function deleteNode(workflowId: WorkflowId, nodeId: string): Promise<void> {
+export async function deleteNode(
+  workflowId: WorkflowId,
+  nodeId: string,
+  userId?: string,
+): Promise<void> {
+  const uid = resolveUserId(userId);
   const kv = await getKv();
-  const existing = await kv.get<WorkflowNode>(["nodes", workflowId, nodeId]);
-  const atomic = kv.atomic().delete(["nodes", workflowId, nodeId]);
+  const existing = await kv.get<WorkflowNode>(["users", uid, "nodes", workflowId, nodeId]);
+  const atomic = kv.atomic().delete(["users", uid, "nodes", workflowId, nodeId]);
   if (
     existing.value?.type === "subworkflow" &&
     typeof existing.value.config?.childWorkflowId === "string"
   ) {
     const childId = (existing.value.config.childWorkflowId as string).trim();
     if (childId) {
-      atomic.delete(["subworkflow_refs", childId, workflowId, nodeId]);
+      atomic.delete(["users", uid, "subworkflow_refs", childId, workflowId, nodeId]);
     }
   }
   await atomic.commit();
 }
 
 /** Finds all workflow IDs that are referenced as child workflows in any subworkflow node via index. */
-export async function listReferencedChildWorkflowIds(): Promise<Set<string>> {
+export async function listReferencedChildWorkflowIds(userId?: string): Promise<Set<string>> {
+  const uid = resolveUserId(userId);
   const kv = await getKv();
   const referencedIds = new Set<string>();
-  for await (const entry of kv.list({ prefix: ["subworkflow_refs"] })) {
-    const childId = entry.key[1];
+  for await (const entry of kv.list({ prefix: ["users", uid, "subworkflow_refs"] })) {
+    const childId = entry.key[3];
     if (typeof childId === "string" && childId.length > 0) {
       referencedIds.add(childId);
     }
   }
 
-  // Fallback for legacy data not yet indexed: scan nodes once and backfill index
+  // Fallback for legacy data not yet indexed: scan nodes once and record sentinel
   if (referencedIds.size === 0) {
-    for await (const entry of kv.list<WorkflowNode>({ prefix: ["nodes"] })) {
-      const node = entry.value;
-      if (node && node.type === "subworkflow") {
-        const childId = node.config?.childWorkflowId;
-        if (typeof childId === "string" && childId.trim().length > 0) {
-          const trimmed = childId.trim();
-          referencedIds.add(trimmed);
-          await kv.set(["subworkflow_refs", trimmed, node.workflowId, node.id], true);
+    const indexedFlag = await kv.get<boolean>(["users", uid, "subworkflow_refs_indexed"]);
+    if (!indexedFlag.value) {
+      for await (const entry of kv.list<WorkflowNode>({ prefix: ["users", uid, "nodes"] })) {
+        const node = entry.value;
+        if (node && node.type === "subworkflow") {
+          const childId = node.config?.childWorkflowId;
+          if (typeof childId === "string" && childId.trim().length > 0) {
+            const trimmed = childId.trim();
+            referencedIds.add(trimmed);
+            await kv.set(
+              ["users", uid, "subworkflow_refs", trimmed, node.workflowId, node.id],
+              true,
+            );
+          }
         }
       }
+      await kv.set(["users", uid, "subworkflow_refs_indexed"], true);
     }
   }
 
@@ -240,17 +276,21 @@ export async function listReferencedChildWorkflowIds(): Promise<Set<string>> {
 // Edges
 // ---------------------------------------------------------------------------
 
-export async function saveEdge(edge: WorkflowEdge): Promise<void> {
+export async function saveEdge(edge: WorkflowEdge, userId?: string): Promise<void> {
+  const uid = resolveUserId(userId || edge.userId);
+  edge.userId = uid;
   const kv = await getKv();
-  await kv.set(["edges", edge.workflowId, edge.id], edge);
+  await kv.set(["users", uid, "edges", edge.workflowId, edge.id], edge);
 }
 
 export async function getEdge(
   workflowId: WorkflowId,
   edgeId: string,
+  userId?: string,
 ): Promise<WorkflowEdge | null> {
+  const uid = resolveUserId(userId);
   const kv = await getKv();
-  const entry = await kv.get<WorkflowEdge>(["edges", workflowId, edgeId]);
+  const entry = await kv.get<WorkflowEdge>(["users", uid, "edges", workflowId, edgeId]);
   return entry.value;
 }
 
@@ -258,20 +298,28 @@ export function listEdges(
   workflowId: WorkflowId,
   options?: ListOptions,
 ): Promise<WorkflowEdge[]> {
-  return listEntries<WorkflowEdge>(["edges", workflowId], options);
+  const uid = resolveUserId(options?.userId);
+  return listEntries<WorkflowEdge>(["users", uid, "edges", workflowId], options);
 }
 
-export async function deleteEdge(workflowId: WorkflowId, edgeId: string): Promise<void> {
+export async function deleteEdge(
+  workflowId: WorkflowId,
+  edgeId: string,
+  userId?: string,
+): Promise<void> {
+  const uid = resolveUserId(userId);
   const kv = await getKv();
-  await kv.delete(["edges", workflowId, edgeId]);
+  await kv.delete(["users", uid, "edges", workflowId, edgeId]);
 }
 
 /** Deletes all edges that reference the given node (inbound or outbound) atomically. */
 export async function deleteEdgesForNode(
   workflowId: WorkflowId,
   nodeId: string,
+  userId?: string,
 ): Promise<WorkflowEdge[]> {
-  const edges = await listEdges(workflowId);
+  const uid = resolveUserId(userId);
+  const edges = await listEdges(workflowId, { userId: uid });
   const removed: WorkflowEdge[] = [];
   const kv = await getKv();
   let atomic = kv.atomic();
@@ -279,7 +327,7 @@ export async function deleteEdgesForNode(
 
   for (const edge of edges) {
     if (edge.fromNodeId === nodeId || edge.toNodeId === nodeId) {
-      atomic.delete(["edges", workflowId, edge.id]);
+      atomic.delete(["users", uid, "edges", workflowId, edge.id]);
       removed.push(edge);
       opCount++;
       if (opCount >= MAX_ATOMIC_OPS) {
@@ -301,18 +349,27 @@ export async function deleteEdgesForNode(
 // ---------------------------------------------------------------------------
 
 /** Saves a workflow execution (both the main record and the by-workflow index entry). */
-export async function saveExecution(execution: WorkflowExecution): Promise<void> {
+export async function saveExecution(
+  execution: WorkflowExecution,
+  userId?: string,
+): Promise<void> {
+  const uid = resolveUserId(userId || execution.userId);
+  execution.userId = uid;
   const kv = await getKv();
   await kv.atomic()
-    .set(["executions", execution.id], execution)
-    .set(["executions_by_workflow", execution.workflowId, execution.id], execution.id)
+    .set(["users", uid, "executions", execution.id], execution)
+    .set(["users", uid, "executions_by_workflow", execution.workflowId, execution.id], execution.id)
     .commit();
 }
 
 /** Retrieves a workflow execution by its ID. Returns null if not found. */
-export async function getExecution(id: ExecutionId): Promise<WorkflowExecution | null> {
+export async function getExecution(
+  id: ExecutionId,
+  userId?: string,
+): Promise<WorkflowExecution | null> {
+  const uid = resolveUserId(userId);
   const kv = await getKv();
-  const entry = await kv.get<WorkflowExecution>(["executions", id]);
+  const entry = await kv.get<WorkflowExecution>(["users", uid, "executions", id]);
   return entry.value;
 }
 
@@ -320,13 +377,21 @@ export async function getExecution(id: ExecutionId): Promise<WorkflowExecution |
  * Lists all workflow executions, optionally filtered to a specific workflow.
  * If workflowId is provided, uses the by-workflow index with batched lookups.
  */
-export async function listExecutions(workflowId?: WorkflowId): Promise<WorkflowExecution[]> {
+export async function listExecutions(
+  workflowId?: WorkflowId,
+  options?: { userId?: string },
+): Promise<WorkflowExecution[]> {
+  const uid = resolveUserId(options?.userId);
   const kv = await getKv();
   const results: WorkflowExecution[] = [];
 
   if (workflowId) {
     const ids: string[] = [];
-    for await (const entry of kv.list<string>({ prefix: ["executions_by_workflow", workflowId] })) {
+    for await (
+      const entry of kv.list<string>({
+        prefix: ["users", uid, "executions_by_workflow", workflowId],
+      })
+    ) {
       if (entry.value) {
         ids.push(entry.value);
       }
@@ -334,7 +399,7 @@ export async function listExecutions(workflowId?: WorkflowId): Promise<WorkflowE
     // Batch lookup using getMany in chunks of 128 keys
     for (let i = 0; i < ids.length; i += 128) {
       const chunk = ids.slice(i, i + 128);
-      const keys = chunk.map((id) => ["executions", id]);
+      const keys = chunk.map((id) => ["users", uid, "executions", id]);
       const entries = await kv.getMany<WorkflowExecution[]>(keys);
       for (const entry of entries) {
         if (entry.value) {
@@ -343,7 +408,9 @@ export async function listExecutions(workflowId?: WorkflowId): Promise<WorkflowE
       }
     }
   } else {
-    for await (const entry of kv.list<WorkflowExecution>({ prefix: ["executions"] })) {
+    for await (
+      const entry of kv.list<WorkflowExecution>({ prefix: ["users", uid, "executions"] })
+    ) {
       if (entry.value && typeof entry.value === "object") {
         results.push(entry.value);
       }
@@ -354,11 +421,15 @@ export async function listExecutions(workflowId?: WorkflowId): Promise<WorkflowE
 }
 
 /** Deletes a workflow execution by its ID (removes both the record and the by-workflow index entry). */
-export async function deleteExecution(execution: WorkflowExecution): Promise<void> {
+export async function deleteExecution(
+  execution: WorkflowExecution,
+  userId?: string,
+): Promise<void> {
+  const uid = resolveUserId(userId || execution.userId);
   const kv = await getKv();
   await kv.atomic()
-    .delete(["executions", execution.id])
-    .delete(["executions_by_workflow", execution.workflowId, execution.id])
+    .delete(["users", uid, "executions", execution.id])
+    .delete(["users", uid, "executions_by_workflow", execution.workflowId, execution.id])
     .commit();
 }
 
@@ -369,6 +440,7 @@ export async function deleteExecution(execution: WorkflowExecution): Promise<voi
 export interface ExportBundleOptions {
   includeExecutions?: boolean;
   includeSubworkflows?: boolean;
+  userId?: string;
 }
 
 /**
@@ -378,15 +450,16 @@ export async function exportWorkflowBundle(
   workflowId: WorkflowId,
   options?: ExportBundleOptions,
 ): Promise<WorkflowExportBundle | null> {
-  const primaryWf = await getWorkflow(workflowId);
+  const uid = resolveUserId(options?.userId);
+  const primaryWf = await getWorkflow(workflowId, uid);
   if (!primaryWf) return null;
 
   const includeExecs = options?.includeExecutions ?? false;
   const includeSubs = options?.includeSubworkflows ?? true;
 
-  const primaryNodes = await listNodes(workflowId);
-  const primaryEdges = await listEdges(workflowId);
-  const primaryExecs = includeExecs ? await listExecutions(workflowId) : undefined;
+  const primaryNodes = await listNodes(workflowId, { userId: uid });
+  const primaryEdges = await listEdges(workflowId, { userId: uid });
+  const primaryExecs = includeExecs ? await listExecutions(workflowId, { userId: uid }) : undefined;
 
   const primaryData: WorkflowExportData = {
     workflow: primaryWf,
@@ -412,11 +485,13 @@ export async function exportWorkflowBundle(
 
     while (queue.length > 0) {
       const currentChildId = queue.shift()!;
-      const childWf = await getWorkflow(currentChildId);
+      const childWf = await getWorkflow(currentChildId, uid);
       if (childWf) {
-        const childNodes = await listNodes(currentChildId);
-        const childEdges = await listEdges(currentChildId);
-        const childExecs = includeExecs ? await listExecutions(currentChildId) : undefined;
+        const childNodes = await listNodes(currentChildId, { userId: uid });
+        const childEdges = await listEdges(currentChildId, { userId: uid });
+        const childExecs = includeExecs
+          ? await listExecutions(currentChildId, { userId: uid })
+          : undefined;
 
         subworkflows.push({
           workflow: childWf,
@@ -449,6 +524,7 @@ export async function exportWorkflowBundle(
 export interface ImportBundleOptions {
   remapIds?: boolean;
   overwrite?: boolean;
+  userId?: string;
 }
 
 /**
@@ -464,6 +540,7 @@ export async function importWorkflowBundle(
     );
   }
 
+  const uid = resolveUserId(options?.userId);
   const remapIds = options?.remapIds ?? false;
   const overwrite = options?.overwrite ?? false;
 
@@ -475,7 +552,7 @@ export async function importWorkflowBundle(
   // 1. Check for collisions if not remapping and not overwriting
   if (!remapIds && !overwrite) {
     for (const item of allItems) {
-      const existing = await getWorkflow(item.workflow.id);
+      const existing = await getWorkflow(item.workflow.id, uid);
       if (existing) {
         throw new Error(
           `Workflow with ID "${item.workflow.id}" (${item.workflow.name}) already exists. Set overwrite: true or remapIds: true to import.`,
@@ -517,6 +594,7 @@ export async function importWorkflowBundle(
     const transformedWf: Workflow = {
       ...item.workflow,
       id: wfId,
+      userId: uid,
       updatedAt: remapIds ? now : item.workflow.updatedAt,
       createdAt: remapIds ? now : item.workflow.createdAt,
     };
@@ -536,6 +614,7 @@ export async function importWorkflowBundle(
         ...node,
         id: nId,
         workflowId: wfId,
+        userId: uid,
         config,
         updatedAt: remapIds ? now : node.updatedAt,
         createdAt: remapIds ? now : node.createdAt,
@@ -553,6 +632,7 @@ export async function importWorkflowBundle(
         ...edge,
         id: eId,
         workflowId: wfId,
+        userId: uid,
         fromNodeId,
         toNodeId,
       };
@@ -574,6 +654,7 @@ export async function importWorkflowBundle(
         ...exec,
         id: exId,
         workflowId: wfId,
+        userId: uid,
         nodeStates,
       };
     });
@@ -589,7 +670,7 @@ export async function importWorkflowBundle(
   // 4. If overwrite is true and not remapped, delete existing workflows first to clean orphans
   if (overwrite && !remapIds) {
     for (const item of transformedItems) {
-      await deleteWorkflow(item.workflow.id);
+      await deleteWorkflow(item.workflow.id, uid);
     }
   }
 
@@ -600,14 +681,14 @@ export async function importWorkflowBundle(
   const importedWorkflowIds: WorkflowId[] = [];
 
   for (const item of transformedItems) {
-    await saveWorkflow(item.workflow);
-    await saveNodes(item.nodes);
+    await saveWorkflow(item.workflow, uid);
+    await saveNodes(item.nodes, uid);
     for (const edge of item.edges) {
-      await saveEdge(edge);
+      await saveEdge(edge, uid);
     }
     if (item.executions) {
       for (const exec of item.executions) {
-        await saveExecution(exec);
+        await saveExecution(exec, uid);
         totalExecutions++;
       }
     }

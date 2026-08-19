@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { getKv } from "../../store/kv.ts";
+import { getKv, resolveUserId } from "../../store/kv.ts";
 import type { Workflow, WorkflowEdge, WorkflowNode } from "../../store/types.ts";
 import { createErrorResponse } from "../registry.ts";
 import { defineTool, jsonResponse, requireWorkflowGraph } from "../helpers.ts";
@@ -268,56 +268,73 @@ export const extractSubworkflowTool = defineTool({
     }
 
     // 6. Persist Child Workflow and Parent Workflow mutations atomically
+    const uid = resolveUserId();
+    childWorkflow.userId = uid;
+    parentSubworkflowNode.userId = uid;
+
     const kv = await getKv();
     const atomic = kv.atomic();
 
     // Child workflow record
-    atomic.set(["workflows", childWorkflow.id], childWorkflow);
+    atomic.set(["users", uid, "workflows", childWorkflow.id], childWorkflow);
 
     // Child nodes
     const childAllNodes = [childStartNode, ...childMigratedNodes, childEndNode];
     for (const node of childAllNodes) {
-      atomic.set(["nodes", childWorkflow.id, node.id], node);
+      node.userId = uid;
+      atomic.set(["users", uid, "nodes", childWorkflow.id, node.id], node);
       if (node.type === "subworkflow" && typeof node.config?.childWorkflowId === "string") {
         const cId = (node.config.childWorkflowId as string).trim();
         if (cId) {
-          atomic.set(["subworkflow_refs", cId, childWorkflow.id, node.id], true);
+          atomic.set(["users", uid, "subworkflow_refs", cId, childWorkflow.id, node.id], true);
         }
       }
     }
 
     // Child edges
     for (const edge of childEdges) {
-      atomic.set(["edges", childWorkflow.id, edge.id], edge);
+      edge.userId = uid;
+      atomic.set(["users", uid, "edges", childWorkflow.id, edge.id], edge);
     }
 
     // Delete extracted parent nodes & their subworkflow_refs if any
     for (const nodeId of nodeIds) {
-      atomic.delete(["nodes", parentWorkflowId, nodeId]);
+      atomic.delete(["users", uid, "nodes", parentWorkflowId, nodeId]);
       const nodeObj = parentNodeMap.get(nodeId);
       if (nodeObj?.type === "subworkflow" && typeof nodeObj.config?.childWorkflowId === "string") {
         const cId = (nodeObj.config.childWorkflowId as string).trim();
         if (cId) {
-          atomic.delete(["subworkflow_refs", cId, parentWorkflowId, nodeId]);
+          atomic.delete(["users", uid, "subworkflow_refs", cId, parentWorkflowId, nodeId]);
         }
       }
     }
 
     // Delete extracted / obsolete parent edges
     for (const edge of [...internalEdges, ...inboundExternalEdges, ...outboundExternalEdges]) {
-      atomic.delete(["edges", parentWorkflowId, edge.id]);
+      atomic.delete(["users", uid, "edges", parentWorkflowId, edge.id]);
     }
 
     // Save replacement subworkflow node in parent and register subworkflow ref index
-    atomic.set(["nodes", parentWorkflowId, parentSubworkflowNode.id], parentSubworkflowNode);
     atomic.set(
-      ["subworkflow_refs", childWorkflowId, parentWorkflowId, parentSubworkflowNode.id],
+      ["users", uid, "nodes", parentWorkflowId, parentSubworkflowNode.id],
+      parentSubworkflowNode,
+    );
+    atomic.set(
+      [
+        "users",
+        uid,
+        "subworkflow_refs",
+        childWorkflowId,
+        parentWorkflowId,
+        parentSubworkflowNode.id,
+      ],
       true,
     );
 
     // Save new parent rewired edges
     for (const edge of newParentEdges) {
-      atomic.set(["edges", parentWorkflowId, edge.id], edge);
+      edge.userId = uid;
+      atomic.set(["users", uid, "edges", parentWorkflowId, edge.id], edge);
     }
 
     const commitResult = await atomic.commit();
