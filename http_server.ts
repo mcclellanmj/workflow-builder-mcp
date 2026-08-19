@@ -12,6 +12,7 @@
  */
 
 import { authenticateRequest } from "./auth/oauth.ts";
+import { safeGetEnv } from "./env.ts";
 import { defaultRegistry } from "./mcp/registry.ts";
 import { allTools } from "./mcp/tools/index.ts";
 import { handleAuthRoutes } from "./routes/auth_routes.ts";
@@ -80,7 +81,7 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
 
 // Direct Execution Entrypoint
 if (import.meta.main) {
-  const port = Number(Deno.env.get("PORT") || 8000);
+  const port = Number(safeGetEnv("PORT") || 8000);
   console.log(`[WORKFLOW_MCP] Starting HTTP serverless instance on port ${port}...`);
   Deno.serve({ port }, handleHttpRequest);
 }

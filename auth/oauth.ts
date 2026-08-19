@@ -12,6 +12,7 @@ import {
   signIn as kvSignIn,
   signOut as kvSignOut,
 } from "@deno/kv-oauth";
+import { safeGetEnv } from "../env.ts";
 import { getKv } from "../store/kv.ts";
 
 export interface UserSession {
@@ -49,10 +50,10 @@ export interface ActiveOAuthConfig {
  * Supports GitHub, Google, or returns null if OAuth is not configured.
  */
 export function getOAuthConfig(): ActiveOAuthConfig | null {
-  const redirectUri = Deno.env.get("REDIRECT_URI");
+  const redirectUri = safeGetEnv("REDIRECT_URI");
 
-  const githubClientId = Deno.env.get("GITHUB_CLIENT_ID");
-  const githubClientSecret = Deno.env.get("GITHUB_CLIENT_SECRET");
+  const githubClientId = safeGetEnv("GITHUB_CLIENT_ID");
+  const githubClientSecret = safeGetEnv("GITHUB_CLIENT_SECRET");
   if (githubClientId && githubClientSecret) {
     return {
       provider: "github" as const,
@@ -63,8 +64,8 @@ export function getOAuthConfig(): ActiveOAuthConfig | null {
     };
   }
 
-  const googleClientId = Deno.env.get("GOOGLE_CLIENT_ID");
-  const googleClientSecret = Deno.env.get("GOOGLE_CLIENT_SECRET");
+  const googleClientId = safeGetEnv("GOOGLE_CLIENT_ID");
+  const googleClientSecret = safeGetEnv("GOOGLE_CLIENT_SECRET");
   if (googleClientId && googleClientSecret) {
     return {
       provider: "google" as const,
@@ -188,7 +189,7 @@ export async function createSession(
     .set(["users", userId, "profile"], session)
     .commit();
 
-  const isSecure = Deno.env.get("DENO_ENV") === "production";
+  const isSecure = safeGetEnv("DENO_ENV") === "production";
   const cookieHeader = `site-session=${sessionId}; Path=/; HttpOnly; SameSite=Lax${
     isSecure ? "; Secure" : ""
   }; Max-Age=2592000`;
@@ -336,8 +337,8 @@ export async function authenticateRequest(req: Request): Promise<AuthResult | nu
   }
 
   // 3. Check X-User-Id header for development / testing environments
-  const allowHeaderAuth = Deno.env.get("ALLOW_HEADER_AUTH") === "1" ||
-    Deno.env.get("DENO_ENV") !== "production";
+  const allowHeaderAuth = safeGetEnv("ALLOW_HEADER_AUTH") === "1" ||
+    safeGetEnv("DENO_ENV") !== "production";
   const headerUserId = req.headers.get("x-user-id") || req.headers.get("X-User-Id");
   if (allowHeaderAuth && headerUserId && headerUserId.trim().length > 0) {
     return {
