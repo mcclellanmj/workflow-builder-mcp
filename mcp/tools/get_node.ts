@@ -10,44 +10,61 @@ import {
 } from "../helpers.ts";
 
 const GetNodeSchema = z.object({
-  workflowId: z.string().min(1).describe("The unique ID of the workflow containing the node."),
-  nodeId: z.string().min(1).describe("The unique ID of the node to retrieve."),
+  workflow: z.string().min(1).optional().describe(
+    "The unique identifier, name, or slug of the workflow containing the node.",
+  ),
+  workflowId: z.string().min(1).optional().describe(
+    "Alias for 'workflow'. The unique ID, name, or slug of the workflow containing the node.",
+  ),
+  node: z.string().min(1).optional().describe(
+    "The unique ID, name, or slug of the node to retrieve.",
+  ),
+  nodeId: z.string().min(1).optional().describe(
+    "Alias for 'node'. The unique ID, name, or slug of the node to retrieve.",
+  ),
   executionId: z.string().min(1).optional().describe(
     "Optional execution ID. When provided, node status fields reflect that specific concurrent run's state.",
   ),
+}).refine((data) => (data.workflow || data.workflowId) && (data.node || data.nodeId), {
+  message: "Workflow ('workflow' or 'workflowId') and node ('node' or 'nodeId') must be provided.",
 });
 
 export const getNodeTool = defineTool({
   name: "node_get",
   description:
-    "Gets full details of a single node in a workflow, including all connected inbound and outbound edges. When an executionId is provided, status/error/iteration fields reflect that specific concurrent run's state.",
+    "Gets full details of a single node in a workflow, including all connected inbound and outbound edges. Supports workflow and node UUIDs, exact names, or slugs. When an executionId is provided, status/error/iteration fields reflect that specific concurrent run's state.",
   schema: GetNodeSchema,
-  execute: async ({ workflowId, nodeId, executionId }) => {
-    const nodeCheck = await requireNode(workflowId, nodeId);
+  execute: async ({ workflow, workflowId, node, nodeId, executionId }) => {
+    const targetWorkflow = workflow ?? workflowId!;
+    const targetNode = node ?? nodeId!;
+
+    const nodeCheck = await requireNode(targetWorkflow, targetNode);
     if ("error" in nodeCheck) return nodeCheck.error;
 
-    const edges = await listEdges(workflowId);
+    const { node: resolvedNode, workflow: wf } = nodeCheck;
+
+    const edges = await listEdges(wf.id);
     const inboundEdges: WorkflowEdge[] = [];
     const outboundEdges: WorkflowEdge[] = [];
 
     for (const edge of edges) {
-      if (edge.toNodeId === nodeId) inboundEdges.push(edge);
-      if (edge.fromNodeId === nodeId) outboundEdges.push(edge);
+      if (edge.toNodeId === resolvedNode.id) inboundEdges.push(edge);
+      if (edge.fromNodeId === resolvedNode.id) outboundEdges.push(edge);
     }
 
-    let node = nodeCheck.node;
+    let currentNode = resolvedNode;
 
     if (executionId) {
       const execution = await getExecution(executionId);
       if (!execution) {
         return createErrorResponse(`Execution with ID "${executionId}" not found.`);
       }
-      const [hydrated] = hydrateNodesWithExecution([node], execution);
-      node = hydrated;
+      const [hydrated] = hydrateNodesWithExecution([currentNode], execution);
+      currentNode = hydrated;
     }
 
     return jsonResponse({
-      ...node,
+      ...currentNode,
       inboundEdges,
       outboundEdges,
     });

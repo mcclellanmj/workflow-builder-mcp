@@ -44,6 +44,9 @@
     "@simplewebauthn/server": "npm:@simplewebauthn/server@^10.0.0",
     "@simplewebauthn/types": "npm:@simplewebauthn/types@^10.0.0",
     "@std/assert": "jsr:@std/assert@^1.0.0",
+    "cytoscape": "npm:cytoscape@^3.30.2",
+    "cytoscape-dagre": "npm:cytoscape-dagre@^2.5.0",
+    "dagre": "npm:dagre@^0.8.5",
     "zod": "npm:zod@^3.23.0"
   }
 }

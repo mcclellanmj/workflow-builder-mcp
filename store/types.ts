@@ -218,3 +218,18 @@ export interface WorkflowImportResult {
   };
   validation?: ValidationResult;
 }
+
+// ---------------------------------------------------------------------------
+// Visualization Share Tickets (30-minute shareable links)
+// ---------------------------------------------------------------------------
+
+/** Secure, time-limited ticket for public/shared workflow visualization. */
+export interface ViewTicket {
+  ticketId: string;
+  userId: string;
+  workflowId: WorkflowId;
+  executionId?: ExecutionId;
+  createdAt: string;
+  /** Expiration timestamp in milliseconds (e.g. Date.now() + 30 * 60 * 1000). */
+  expiresAt: number;
+}

@@ -97,32 +97,45 @@ export function renderDashboardHtml(origin: string): string {
     </div>
   </div>
 
-  <!-- Authenticated User Dashboard -->
-  <div id="dashboardSection" class="card hidden">
-    <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 16px;">
-      <div>
-        <h2 style="margin: 0;">👋 Welcome, <span id="userDisplayName">User</span></h2>
-        <p style="margin: 4px 0 0 0; font-size: 0.85rem;">User ID: <code id="userUid">-</code></p>
+    <!-- Authenticated User Dashboard -->
+    <div id="dashboardSection" class="card hidden">
+      <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 16px;">
+        <div>
+          <h2 style="margin: 0;">👋 Welcome, <span id="userDisplayName">User</span></h2>
+          <p style="margin: 4px 0 0 0; font-size: 0.85rem;">User ID: <code id="userUid">-</code></p>
+        </div>
+        <button class="btn btn-secondary" onclick="signOutUser()">Sign Out</button>
       </div>
-      <button class="btn btn-secondary" onclick="signOutUser()">Sign Out</button>
-    </div>
 
-    <h2>🔑 Bearer API Token (For Claude Desktop & Cursor)</h2>
-    <p>Generate a persistent Bearer token to connect remote MCP clients to your personal workflow workspace:</p>
-    
-    <div class="btn-row">
-      <button class="btn" onclick="generateApiToken()">⚡ Generate New API Token</button>
-    </div>
+      <h2>🔐 Registered Devices & Passkeys</h2>
+      <p>Manage hardware passkeys, biometric credentials, and security keys attached to this account:</p>
+      
+      <div id="passkeysListContainer" style="margin-bottom: 16px;">
+        <ul id="passkeysList" style="list-style: none; padding: 0; margin: 0;"></ul>
+      </div>
 
-    <div id="tokenDisplay" class="hidden" style="margin-top: 16px;">
-      <label>Your New API Token (Save this — it won't be shown again):</label>
-      <pre><code id="tokenValue">-</code><button class="copy-btn" onclick="copyToken()">Copy Token</button></pre>
-    </div>
+      <div class="btn-row" style="margin-bottom: 24px;">
+        <button class="btn" onclick="addPasskeyForCurrentDevice()">
+          <span>➕</span> Register Passkey for This Device
+        </button>
+      </div>
 
-    <h2 style="margin-top: 24px;">⚙️ Client Setup Configuration</h2>
-    <p>Paste this configuration into your <code>claude_desktop_config.json</code> or Cursor <code>.cursor/mcp.json</code>:</p>
-    
-    <pre><code id="configSnippet">{
+      <h2>🔑 Bearer API Token (For Claude Desktop & Cursor)</h2>
+      <p>Generate a persistent Bearer token to connect remote MCP clients to your personal workflow workspace:</p>
+      
+      <div class="btn-row">
+        <button class="btn" onclick="generateApiToken()">⚡ Generate New API Token</button>
+      </div>
+
+      <div id="tokenDisplay" class="hidden" style="margin-top: 16px;">
+        <label>Your New API Token (Save this — it won't be shown again):</label>
+        <pre><code id="tokenValue">-</code><button class="copy-btn" onclick="copyToken()">Copy Token</button></pre>
+      </div>
+
+      <h2 style="margin-top: 24px;">⚙️ Client Setup Configuration</h2>
+      <p>Paste this configuration into your <code>claude_desktop_config.json</code> or Cursor <code>.cursor/mcp.json</code>:</p>
+      
+      <pre><code id="configSnippet">{
   "mcpServers": {
     "workflow-mcp": {
       "url": "${origin}/mcp",
@@ -132,229 +145,346 @@ export function renderDashboardHtml(origin: string): string {
     }
   }
 }</code><button class="copy-btn" onclick="copyConfig()">Copy Config</button></pre>
-  </div>
+    </div>
 
-  <div class="card">
-    <h2>📡 Available Endpoints</h2>
-    <ul>
-      <li><strong>Stateless JSON-RPC MCP</strong>: <code>POST ${origin}/mcp</code></li>
-      <li><strong>SSE Stream</strong>: <code>GET ${origin}/sse</code> + <code>POST ${origin}/message</code></li>
-      <li><strong>Health Probe</strong>: <code>GET ${origin}/health</code></li>
-      <li><strong>User Profile</strong>: <code>GET ${origin}/api/me</code></li>
-    </ul>
-  </div>
+    <div class="card">
+      <h2>📡 Available Endpoints</h2>
+      <ul>
+        <li><strong>Live SSR Visualizer</strong>: <code>GET ${origin}/visualize/:workflowId</code> (supports share tickets <code>?ticket=...</code>, 1 week default up to 1 year)</li>
+        <li><strong>Stateless JSON-RPC MCP</strong>: <code>POST ${origin}/mcp</code></li>
+        <li><strong>SSE Stream</strong>: <code>GET ${origin}/sse</code> + <code>POST ${origin}/message</code></li>
+        <li><strong>Health Probe</strong>: <code>GET ${origin}/health</code></li>
+        <li><strong>User Profile</strong>: <code>GET ${origin}/api/me</code></li>
+      </ul>
+    </div>
 
-  <script>
-    const ORIGIN = "${origin}";
+    <script>
+      const ORIGIN = "${origin}";
 
-    function showAlert(msg, isError = false) {
-      const box = document.getElementById("alertBox");
-      box.className = "alert " + (isError ? "alert-error" : "alert-success");
-      box.textContent = msg;
-      box.classList.remove("hidden");
-    }
-
-    function switchAuthTab(tab) {
-      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-      if (tab === "login") {
-        document.querySelectorAll(".tab")[0].classList.add("active");
-        document.getElementById("loginTab").classList.remove("hidden");
-        document.getElementById("registerTab").classList.add("hidden");
-      } else {
-        document.querySelectorAll(".tab")[1].classList.add("active");
-        document.getElementById("loginTab").classList.add("hidden");
-        document.getElementById("registerTab").classList.remove("hidden");
-      }
-    }
-
-    function bufferToBase64Url(buffer) {
-      const bytes = new Uint8Array(buffer);
-      let binary = "";
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-      return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    }
-
-    function base64UrlToBuffer(base64url) {
-      const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/").padEnd(base64url.length + (4 - (base64url.length % 4)) % 4, "=");
-      const binary = atob(base64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      return bytes.buffer;
-    }
-
-    async function checkAuth() {
-      try {
-        const res = await fetch("/api/me");
-        if (res.ok) {
-          const data = await res.json();
-          showDashboard(data);
-        }
-      } catch (err) {
-        console.error("Auth check error:", err);
-      }
-    }
-
-    function showDashboard(userData) {
-      document.getElementById("authSection").classList.add("hidden");
-      document.getElementById("dashboardSection").classList.remove("hidden");
-      document.getElementById("userDisplayName").textContent = userData.user?.name || userData.userId;
-      document.getElementById("userUid").textContent = userData.userId;
-    }
-
-    async function registerWithPasskey() {
-      const username = document.getElementById("regUsername").value.trim();
-      if (!username) {
-        showAlert("Please enter a username.", true);
-        return;
+      function showAlert(msg, isError = false) {
+        const box = document.getElementById("alertBox");
+        box.className = "alert " + (isError ? "alert-error" : "alert-success");
+        box.textContent = msg;
+        box.classList.remove("hidden");
       }
 
-      try {
-        const optRes = await fetch("/auth/passkey/register-options", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username, displayName: username })
-        });
-        const { options, challengeId } = await optRes.json();
-
-        options.challenge = base64UrlToBuffer(options.challenge);
-        options.user.id = base64UrlToBuffer(options.user.id);
-        if (options.excludeCredentials) {
-          for (const cred of options.excludeCredentials) cred.id = base64UrlToBuffer(cred.id);
-        }
-
-        const credential = await navigator.credentials.create({ publicKey: options });
-
-        const formattedResponse = {
-          id: credential.id,
-          rawId: bufferToBase64Url(credential.rawId),
-          type: credential.type,
-          response: {
-            attestationObject: bufferToBase64Url(credential.response.attestationObject),
-            clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
-            transports: credential.response.getTransports ? credential.response.getTransports() : undefined
-          }
-        };
-
-        const verifyRes = await fetch("/auth/passkey/register-verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ challengeId, response: formattedResponse })
-        });
-        const verifyData = await verifyRes.json();
-
-        if (verifyData.verified) {
-          showAlert("Passkey registered successfully! Welcome.", false);
-          checkAuth();
+      function switchAuthTab(tab) {
+        document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+        if (tab === "login") {
+          document.querySelectorAll(".tab")[0].classList.add("active");
+          document.getElementById("loginTab").classList.remove("hidden");
+          document.getElementById("registerTab").classList.add("hidden");
         } else {
-          showAlert(verifyData.error || "Registration verification failed.", true);
+          document.querySelectorAll(".tab")[1].classList.add("active");
+          document.getElementById("loginTab").classList.add("hidden");
+          document.getElementById("registerTab").classList.remove("hidden");
         }
-      } catch (err) {
-        showAlert("Passkey error: " + err.message, true);
       }
-    }
 
-    async function signInWithPasskey() {
-      const username = document.getElementById("loginUsername").value.trim();
+      function bufferToBase64Url(buffer) {
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+        return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      }
 
-      try {
-        const optRes = await fetch("/auth/passkey/login-options", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ username: username || undefined })
-        });
-        const { options, challengeId } = await optRes.json();
+      function base64UrlToBuffer(base64url) {
+        const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/").padEnd(base64url.length + (4 - (base64url.length % 4)) % 4, "=");
+        const binary = atob(base64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        return bytes.buffer;
+      }
 
-        options.challenge = base64UrlToBuffer(options.challenge);
-        if (options.allowCredentials) {
-          for (const cred of options.allowCredentials) cred.id = base64UrlToBuffer(cred.id);
-        }
-
-        const credential = await navigator.credentials.get({ publicKey: options });
-
-        const formattedResponse = {
-          id: credential.id,
-          rawId: bufferToBase64Url(credential.rawId),
-          type: credential.type,
-          response: {
-            authenticatorData: bufferToBase64Url(credential.response.authenticatorData),
-            clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
-            signature: bufferToBase64Url(credential.response.signature),
-            userHandle: credential.response.userHandle ? bufferToBase64Url(credential.response.userHandle) : undefined
+      async function checkAuth() {
+        try {
+          const res = await fetch("/api/me");
+          if (res.ok) {
+            const data = await res.json();
+            showDashboard(data);
+            loadPasskeys();
           }
-        };
-
-        const verifyRes = await fetch("/auth/passkey/login-verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ challengeId, response: formattedResponse })
-        });
-        const verifyData = await verifyRes.json();
-
-        if (verifyData.verified) {
-          showAlert("Signed in successfully with Passkey!", false);
-          checkAuth();
-        } else {
-          showAlert(verifyData.error || "Authentication failed.", true);
+        } catch (err) {
+          console.error("Auth check error:", err);
         }
-      } catch (err) {
-        showAlert("Passkey sign in error: " + err.message, true);
       }
-    }
 
-    async function generateApiToken() {
-      try {
-        const res = await fetch("/api/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Browser Generated Token", expiresInDays: 365 })
-        });
-        if (res.ok) {
+      function showDashboard(userData) {
+        document.getElementById("authSection").classList.add("hidden");
+        document.getElementById("dashboardSection").classList.remove("hidden");
+        document.getElementById("userDisplayName").textContent = userData.user?.name || userData.userId;
+        document.getElementById("userUid").textContent = userData.userId;
+      }
+
+      async function loadPasskeys() {
+        try {
+          const res = await fetch("/api/passkeys");
+          if (!res.ok) return;
           const data = await res.json();
-          document.getElementById("tokenValue").textContent = data.token;
-          document.getElementById("tokenDisplay").classList.remove("hidden");
-          updateConfigSnippet(data.token);
-          showAlert("New API Token generated!", false);
-        }
-      } catch (err) {
-        showAlert("Token generation failed: " + err.message, true);
-      }
-    }
+          const list = document.getElementById("passkeysList");
+          list.innerHTML = "";
 
-    function updateConfigSnippet(token) {
-      const json = JSON.stringify({
-        mcpServers: {
-          "workflow-mcp": {
-            url: ORIGIN + "/mcp",
-            headers: {
-              Authorization: "Bearer " + token
+          if (!data.passkeys || data.passkeys.length === 0) {
+            list.innerHTML = "<li style='color: var(--text-muted); font-size: 0.9rem;'>No passkeys found.</li>";
+            return;
+          }
+
+          data.passkeys.forEach((p, idx) => {
+            const li = document.createElement("li");
+            li.style.cssText = "display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px;";
+            
+            const maskedId = p.id.slice(0, 10) + "..." + p.id.slice(-6);
+            const dateStr = p.createdAt ? new Date(p.createdAt).toLocaleDateString() : "Active";
+            
+            const leftDiv = document.createElement("div");
+            leftDiv.innerHTML = "<strong>🔑 Passkey #" + (idx + 1) + "</strong> <span style='font-size: 0.8rem; color: var(--text-muted); margin-left: 8px;'>(" + p.deviceType + ")</span><br><code style='font-size: 0.75rem; color: var(--text-muted);'>" + maskedId + "</code> <span style='font-size: 0.75rem; color: var(--text-muted);'>• Created " + dateStr + "</span>";
+            li.appendChild(leftDiv);
+
+            if (data.passkeys.length > 1) {
+              const delBtn = document.createElement("button");
+              delBtn.className = "btn btn-danger";
+              delBtn.style.cssText = "padding: 5px 12px; font-size: 0.8rem;";
+              delBtn.textContent = "Remove";
+              delBtn.onclick = () => deletePasskey(p.id);
+              li.appendChild(delBtn);
+            }
+
+            list.appendChild(li);
+          });
+        } catch (err) {
+          console.error("Failed to load passkeys:", err);
+        }
+      }
+
+      async function addPasskeyForCurrentDevice() {
+        try {
+          const optRes = await fetch("/api/passkeys/add-options", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" }
+          });
+          if (!optRes.ok) {
+            const errData = await optRes.json();
+            showAlert(errData.error || "Failed to generate passkey options.", true);
+            return;
+          }
+          const { options, challengeId } = await optRes.json();
+
+          options.challenge = base64UrlToBuffer(options.challenge);
+          options.user.id = base64UrlToBuffer(options.user.id);
+          if (options.excludeCredentials) {
+            for (const cred of options.excludeCredentials) cred.id = base64UrlToBuffer(cred.id);
+          }
+
+          const credential = await navigator.credentials.create({ publicKey: options });
+
+          const formattedResponse = {
+            id: credential.id,
+            rawId: bufferToBase64Url(credential.rawId),
+            type: credential.type,
+            response: {
+              attestationObject: bufferToBase64Url(credential.response.attestationObject),
+              clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+              transports: credential.response.getTransports ? credential.response.getTransports() : undefined
+            }
+          };
+
+          const verifyRes = await fetch("/api/passkeys/add-verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challengeId, response: formattedResponse })
+          });
+          const verifyData = await verifyRes.json();
+
+          if (verifyData.verified) {
+            showAlert("New Passkey added successfully to this account!", false);
+            loadPasskeys();
+          } else {
+            showAlert(verifyData.error || "Passkey verification failed.", true);
+          }
+        } catch (err) {
+          showAlert("Add passkey error: " + err.message, true);
+        }
+      }
+
+      async function deletePasskey(credentialId) {
+        if (!confirm("Are you sure you want to remove this passkey?")) return;
+        try {
+          const res = await fetch("/api/passkeys/" + encodeURIComponent(credentialId), {
+            method: "DELETE"
+          });
+          if (res.ok) {
+            showAlert("Passkey removed.", false);
+            loadPasskeys();
+          } else {
+            const errData = await res.json();
+            showAlert(errData.error || "Failed to remove passkey.", true);
+          }
+        } catch (err) {
+          showAlert("Delete passkey error: " + err.message, true);
+        }
+      }
+
+      async function registerWithPasskey() {
+        const username = document.getElementById("regUsername").value.trim();
+        if (!username) {
+          showAlert("Please enter a username.", true);
+          return;
+        }
+
+        try {
+          const optRes = await fetch("/auth/passkey/register-options", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, displayName: username })
+          });
+          
+          if (!optRes.ok) {
+            const errData = await optRes.json();
+            showAlert(errData.error || "Registration failed.", true);
+            return;
+          }
+
+          const { options, challengeId } = await optRes.json();
+
+          options.challenge = base64UrlToBuffer(options.challenge);
+          options.user.id = base64UrlToBuffer(options.user.id);
+          if (options.excludeCredentials) {
+            for (const cred of options.excludeCredentials) cred.id = base64UrlToBuffer(cred.id);
+          }
+
+          const credential = await navigator.credentials.create({ publicKey: options });
+
+          const formattedResponse = {
+            id: credential.id,
+            rawId: bufferToBase64Url(credential.rawId),
+            type: credential.type,
+            response: {
+              attestationObject: bufferToBase64Url(credential.response.attestationObject),
+              clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+              transports: credential.response.getTransports ? credential.response.getTransports() : undefined
+            }
+          };
+
+          const verifyRes = await fetch("/auth/passkey/register-verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challengeId, response: formattedResponse })
+          });
+          const verifyData = await verifyRes.json();
+
+          if (verifyData.verified) {
+            showAlert("Passkey registered successfully! Welcome.", false);
+            checkAuth();
+          } else {
+            showAlert(verifyData.error || "Registration verification failed.", true);
+          }
+        } catch (err) {
+          showAlert("Passkey error: " + err.message, true);
+        }
+      }
+
+      async function signInWithPasskey() {
+        const username = document.getElementById("loginUsername").value.trim();
+
+        try {
+          const optRes = await fetch("/auth/passkey/login-options", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: username || undefined })
+          });
+          const { options, challengeId } = await optRes.json();
+
+          options.challenge = base64UrlToBuffer(options.challenge);
+          if (options.allowCredentials) {
+            for (const cred of options.allowCredentials) cred.id = base64UrlToBuffer(cred.id);
+          }
+
+          const credential = await navigator.credentials.get({ publicKey: options });
+
+          const formattedResponse = {
+            id: credential.id,
+            rawId: bufferToBase64Url(credential.rawId),
+            type: credential.type,
+            response: {
+              authenticatorData: bufferToBase64Url(credential.response.authenticatorData),
+              clientDataJSON: bufferToBase64Url(credential.response.clientDataJSON),
+              signature: bufferToBase64Url(credential.response.signature),
+              userHandle: credential.response.userHandle ? bufferToBase64Url(credential.response.userHandle) : undefined
+            }
+          };
+
+          const verifyRes = await fetch("/auth/passkey/login-verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ challengeId, response: formattedResponse })
+          });
+          const verifyData = await verifyRes.json();
+
+          if (verifyData.verified) {
+            showAlert("Signed in successfully with Passkey!", false);
+            checkAuth();
+          } else {
+            showAlert(verifyData.error || "Authentication failed.", true);
+          }
+        } catch (err) {
+          showAlert("Passkey sign in error: " + err.message, true);
+        }
+      }
+
+      async function generateApiToken() {
+        try {
+          const res = await fetch("/api/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "Browser Generated Token", expiresInDays: 365 })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            document.getElementById("tokenValue").textContent = data.token;
+            document.getElementById("tokenDisplay").classList.remove("hidden");
+            updateConfigSnippet(data.token);
+            showAlert("New API Token generated!", false);
+          }
+        } catch (err) {
+          showAlert("Token generation failed: " + err.message, true);
+        }
+      }
+
+      function updateConfigSnippet(token) {
+        const json = JSON.stringify({
+          mcpServers: {
+            "workflow-mcp": {
+              url: ORIGIN + "/mcp",
+              headers: {
+                Authorization: "Bearer " + token
+              }
             }
           }
-        }
-      }, null, 2);
-      document.getElementById("configSnippet").textContent = json;
-    }
+        }, null, 2);
+        document.getElementById("configSnippet").textContent = json;
+      }
 
-    function copyToken() {
-      const token = document.getElementById("tokenValue").textContent;
-      navigator.clipboard.writeText(token);
-      showAlert("API token copied to clipboard!", false);
-    }
+      function copyToken() {
+        const token = document.getElementById("tokenValue").textContent;
+        navigator.clipboard.writeText(token);
+        showAlert("API token copied to clipboard!", false);
+      }
 
-    function copyConfig() {
-      const config = document.getElementById("configSnippet").textContent;
-      navigator.clipboard.writeText(config);
-      showAlert("Configuration JSON copied to clipboard!", false);
-    }
+      function copyConfig() {
+        const config = document.getElementById("configSnippet").textContent;
+        navigator.clipboard.writeText(config);
+        showAlert("Configuration JSON copied to clipboard!", false);
+      }
 
-    async function signOutUser() {
-      await fetch("/oauth/signout");
-      location.reload();
-    }
+      async function signOutUser() {
+        await fetch("/oauth/signout");
+        location.reload();
+      }
 
-    checkAuth();
-  </script>
-</body>
-</html>`;
+      checkAuth();
+    </script>
+  </body>
+  </html>`;
 }
 
 export async function handleStaticRoutes(

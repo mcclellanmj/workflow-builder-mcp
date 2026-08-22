@@ -22,8 +22,10 @@ import {
   handleMcpRoutes,
   processJsonRpcMessage,
 } from "./routes/mcp_routes.ts";
+import { handlePasskeyManagementRoutes } from "./routes/passkey_routes.ts";
 import { handleStaticRoutes } from "./routes/static_routes.ts";
 import { handleTokenRoutes } from "./routes/token_routes.ts";
+import { handleVisualizeRoutes } from "./routes/visualize_routes.ts";
 
 export { getCachedToolDefinitions, processJsonRpcMessage };
 
@@ -62,7 +64,13 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
   // 3. Resolve Authentication (Bearer Token, Session Cookie, or Header Auth)
   const auth = await authenticateRequest(req);
 
-  // 4. Token Routes
+  // 4. Authenticated Passkey Management Routes (/api/passkeys/*)
+  if (auth) {
+    const passkeyRes = await handlePasskeyManagementRoutes(req, url, auth);
+    if (passkeyRes) return passkeyRes;
+  }
+
+  // 5. Token Routes
   if (auth) {
     const tokenRes = await handleTokenRoutes(req, url, auth);
     if (tokenRes) return tokenRes;
@@ -72,7 +80,11 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
   const mcpRes = await handleMcpRoutes(req, url, auth);
   if (mcpRes) return mcpRes;
 
-  // 6. Static / Discovery / Health / Profile Routes
+  // 6. Visualization & Share Ticket Routes (/visualize/*, /api/visualize/*)
+  const visRes = await handleVisualizeRoutes(req, url, auth);
+  if (visRes) return visRes;
+
+  // 7. Static / Discovery / Health / Profile Routes
   const staticRes = await handleStaticRoutes(req, url, auth);
   if (staticRes) return staticRes;
 

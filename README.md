@@ -12,6 +12,19 @@ transports** ready for deployment on Deno Deploy or any serverless runtime.
 
 ## Features
 
+- **Zero UUID Lookup Overhead (Name, Slug, & Path Resolution)**:
+  - Reference workflows and nodes by **UUID**, **Name**, **Slug**, or **Hierarchical Path** (e.g.
+    `workflow_get({ workflow: "review-workflow/security" })`,
+    `node_edit({ workflow: "review-workflow", node: "Step 5-web", ... })`).
+- **Cross-Workflow Search (`workflow_search`)**:
+  - Instantly search across all standalone workflows and nested subworkflows for keywords, phrases,
+    or boolean expressions (`authentication OR passkey`) with contextual line excerpts.
+- **Atomic Multi-Node Updates (`workflow_patch`)**:
+  - Batch edit multiple nodes in a single atomic tool call, eliminating sequential roundtrip tool
+    call overhead.
+- **Recursive Hierarchical View (`workflow_tree`)**:
+  - Recursively expand and display complete subworkflow hierarchies up to configurable depth in
+    formatted ASCII diagrams and structured JSON.
 - **Zero 3rd-Party Biometric Authentication (Passkeys / WebAuthn)**:
   - Sign in or register in 1-click using native **Touch ID, Face ID, Windows Hello, or hardware
     security keys** in the browser.
@@ -24,10 +37,8 @@ transports** ready for deployment on Deno Deploy or any serverless runtime.
   - **Streamable SSE (`GET /sse` + `POST /message`)**: Standard MCP Server-Sent Events transport.
 - **Multi-Tenant User Isolation**: All workflows, nodes, edges, and executions are scoped by
   `userId` in Deno KV (`["users", userId, ...]`).
-- **Optional OAuth 2.0 Fallback**: Supports standard OAuth (GitHub / Google) via `@deno/kv-oauth` if
-  external OAuth is desired.
-- **Workflow & Graph Management**: Create, list, inspect, and delete workflow graphs with arbitrary
-  topologies.
+- **Workflow & Graph Management**: Create, list, inspect, patch, search, tree, and delete workflow
+  graphs with arbitrary topologies.
 - **Rich Node Types**: Supports `start`, `step`, `decision`, `subworkflow`, `user_interaction`, and
   `end` nodes.
 - **Graph Validation & Heuristics**: Validates graph connectivity, reachability, start/end node
@@ -36,7 +47,8 @@ transports** ready for deployment on Deno Deploy or any serverless runtime.
 - **Interactive & Multi-Project Execution**: Execute workflows step-by-step with state isolation,
   branch conditions, iteration tracking, and guardrails against infinite loops.
 - **Mermaid & Interactive HTML Visualization**: Export visual Mermaid diagrams of workflow states
-  and interactive HTML dashboards.
+  and interactive HTML dashboards with Server-Side Rendered (SSR) vector graphics and zero external
+  CDN scripts.
 - **Export & Import Bundles**: Export full workflows with recursive subworkflows and execution runs
   into portable JSON bundles with automatic ID remapping.
 
@@ -137,33 +149,16 @@ In `.cursor/mcp.json` or Cursor Settings $\rightarrow$ Features $\rightarrow$ MC
 
 ---
 
-## API & Endpoints
-
-| Endpoint                         | Method   | Description                                         |
-| :------------------------------- | :------- | :-------------------------------------------------- |
-| `/`                              | `GET`    | Discovery & Passkey Authentication Dashboard.       |
-| `/health`                        | `GET`    | Health probe.                                       |
-| `/auth/passkey/register-options` | `POST`   | WebAuthn registration options.                      |
-| `/auth/passkey/register-verify`  | `POST`   | Verify WebAuthn registration & create session.      |
-| `/auth/passkey/login-options`    | `POST`   | WebAuthn authentication options.                    |
-| `/auth/passkey/login-verify`     | `POST`   | Verify WebAuthn signature & create session.         |
-| `/mcp` or `/`                    | `POST`   | Stateless JSON-RPC 2.0 MCP protocol endpoint.       |
-| `/sse`                           | `GET`    | Server-Sent Events stream for standard MCP clients. |
-| `/message`                       | `POST`   | Message receiver for active SSE sessions.           |
-| `/api/me`                        | `GET`    | Current user profile and auth status.               |
-| `/api/token`                     | `POST`   | Generate a new Bearer API token.                    |
-| `/api/tokens`                    | `GET`    | List active Bearer API tokens.                      |
-| `/api/tokens/:id`                | `DELETE` | Revoke a Bearer API token.                          |
-
----
-
 ## Available MCP Tools
 
 | Tool                           | Description                                                                         |
 | :----------------------------- | :---------------------------------------------------------------------------------- |
 | `workflow_create`              | Create a new named workflow in the user's scope.                                    |
 | `workflow_list`                | List all workflows with metadata and status for current user.                       |
-| `workflow_get`                 | Retrieve full workflow details (nodes and edges).                                   |
+| `workflow_get`                 | Retrieve full workflow details (nodes and edges), with optional subworkflow bundle. |
+| `workflow_search`              | Cross-workflow keyword/boolean search across names, prompts, descriptions, configs. |
+| `workflow_patch`               | Batch atomic updates for multiple nodes in a workflow graph in one call.            |
+| `workflow_tree`                | Recursive hierarchical ASCII and JSON view of nested child subworkflows.            |
 | `workflow_delete`              | Atomically delete a workflow and all associated nodes/edges.                        |
 | `node_add`                     | Add a node (`start`, `step`, `decision`, `subworkflow`, `user_interaction`, `end`). |
 | `node_edit`                    | Edit an existing node's name, description, type, or config.                         |

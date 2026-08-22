@@ -294,3 +294,192 @@ Deno.test("HTTP Server - Batch JSON-RPC and Notifications", async () => {
     kv.close();
   }
 });
+
+Deno.test("HTTP Server - Authenticated Passkey Management Lifecycle", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const userId = "user_passkey_mgr";
+    const tokenInfo = await createApiToken(userId, "Manager Token");
+
+    // 1. Unauthenticated /api/passkeys should return 404 or 401 (not handled by unauthenticated router)
+    const unauthReq = new Request("http://localhost:8000/api/passkeys", { method: "GET" });
+    const unauthRes = await handleHttpRequest(unauthReq);
+    assertEquals(unauthRes.status, 404);
+
+    // 2. Add sample passkeys in KV
+    await kv.set(["users", userId, "passkeys", "key_laptop"], {
+      id: "key_laptop",
+      publicKey: "pk1",
+      counter: 0,
+      deviceType: "platform",
+      createdAt: new Date().toISOString(),
+    });
+    await kv.set(["users", userId, "passkeys", "key_yubikey"], {
+      id: "key_yubikey",
+      publicKey: "pk2",
+      counter: 0,
+      deviceType: "cross-platform",
+      createdAt: new Date().toISOString(),
+    });
+
+    // 3. List passkeys authenticated
+    const listReq = new Request("http://localhost:8000/api/passkeys", {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${tokenInfo.token}` },
+    });
+    const listRes = await handleHttpRequest(listReq);
+    assertEquals(listRes.status, 200);
+    const listData = await listRes.json();
+    assertEquals(listData.passkeys.length, 2);
+
+    // 4. Delete one passkey
+    const delReq = new Request("http://localhost:8000/api/passkeys/key_laptop", {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${tokenInfo.token}` },
+    });
+    const delRes = await handleHttpRequest(delReq);
+    assertEquals(delRes.status, 200);
+
+    // 5. Deleting the last passkey fails with 400
+    const delLastReq = new Request("http://localhost:8000/api/passkeys/key_yubikey", {
+      method: "DELETE",
+      headers: { "Authorization": `Bearer ${tokenInfo.token}` },
+    });
+    const delLastRes = await handleHttpRequest(delLastReq);
+    assertEquals(delLastRes.status, 400);
+    const delLastData = await delLastRes.json();
+    assert(delLastData.error.includes("only registered passkey"));
+  } finally {
+    kv.close();
+  }
+});
+
+import { createViewTicket, saveNode, saveWorkflow } from "./store/kv.ts";
+
+Deno.test("HTTP Server - SSR Visualizer and 30-Minute Share Ticket Routes", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const userId = "user_viz_test";
+    const tokenInfo = await createApiToken(userId, "Viz Token");
+    const now = new Date().toISOString();
+
+    // 1. Create a workflow and nodes in KV
+    const workflowId = "wf-ssr-1";
+    await saveWorkflow({
+      id: workflowId,
+      name: "SSR Test Pipeline",
+      description: "Testing server-side rendering",
+      createdAt: now,
+      updatedAt: now,
+    }, userId);
+
+    await saveNode({
+      id: "node-start",
+      workflowId,
+      type: "start",
+      name: "Begin",
+      description: "Starting node",
+      runInSubAgent: false,
+      config: {},
+      status: "completed",
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    }, userId);
+
+    await saveNode({
+      id: "node-step",
+      workflowId,
+      type: "step",
+      name: "Transform Records",
+      description: "Data transformation step",
+      runInSubAgent: true,
+      config: {},
+      status: "running",
+      error: null,
+      createdAt: now,
+      updatedAt: now,
+    }, userId);
+
+    // 2. Unauthenticated request without ticket -> 401
+    const unauthReq = new Request(`http://localhost:8000/visualize/${workflowId}`, {
+      method: "GET",
+    });
+    const unauthRes = await handleHttpRequest(unauthReq);
+    assertEquals(unauthRes.status, 401);
+    const unauthHtml = await unauthRes.text();
+    assert(unauthHtml.includes("Access Restricted"));
+
+    // 3. Authenticated request with Bearer token -> 200 OK SSR HTML
+    const authReq = new Request(`http://localhost:8000/visualize/${workflowId}`, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${tokenInfo.token}` },
+    });
+    const authRes = await handleHttpRequest(authReq);
+    assertEquals(authRes.status, 200);
+    const authHtml = await authRes.text();
+    assert(authHtml.includes("SSR Test Pipeline"));
+    assert(authHtml.includes('id="cy"'));
+    assert(authHtml.includes("Transform Records"));
+    assert(authHtml.includes("⚡ Sub-Agent"));
+    assert(!authHtml.includes("cdnjs.cloudflare.com"));
+
+    // 4. Create View Ticket with default 1 week expiration
+    const defaultTicket = await createViewTicket(workflowId, undefined, undefined, userId);
+    assert(defaultTicket.ticketId);
+    assert(defaultTicket.expiresAt > Date.now() + 6 * 24 * 60 * 60 * 1000); // at least 6+ days
+
+    const ticket = await createViewTicket(workflowId, undefined, 30, userId);
+    assert(ticket.ticketId);
+
+    // 5. Unauthenticated request with valid ticket -> 200 OK SSR HTML
+    const ticketReq = new Request(
+      `http://localhost:8000/visualize/${workflowId}?ticket=${defaultTicket.ticketId}`,
+      {
+        method: "GET",
+      },
+    );
+    const ticketRes = await handleHttpRequest(ticketReq);
+    assertEquals(ticketRes.status, 200);
+    const ticketHtml = await ticketRes.text();
+    assert(ticketHtml.includes("SSR Test Pipeline"));
+    assert(ticketHtml.includes("Shared Link"));
+    assert(ticketHtml.includes("Transform Records"));
+
+    // 6. Test polling endpoint /api/visualize/:workflowId/data with ticket
+    const dataReq = new Request(
+      `http://localhost:8000/api/visualize/${workflowId}/data?ticket=${ticket.ticketId}`,
+      {
+        method: "GET",
+      },
+    );
+    const dataRes = await handleHttpRequest(dataReq);
+    assertEquals(dataRes.status, 200);
+    const dataJson = await dataRes.json();
+    assertEquals(dataJson.workflow.workflow.name, "SSR Test Pipeline");
+    assertEquals(dataJson.workflow.nodes.length, 2);
+
+    // 7. Expired Ticket test (set expiration to past)
+    await kv.set(["view_tickets", ticket.ticketId], {
+      ...ticket,
+      expiresAt: Date.now() - 1000,
+    });
+
+    const expiredReq = new Request(
+      `http://localhost:8000/visualize/${workflowId}?ticket=${ticket.ticketId}`,
+      {
+        method: "GET",
+      },
+    );
+    const expiredRes = await handleHttpRequest(expiredReq);
+    assertEquals(expiredRes.status, 403);
+    const expiredHtml = await expiredRes.text();
+    assert(expiredHtml.includes("Share Link Expired"));
+  } finally {
+    kv.close();
+  }
+});

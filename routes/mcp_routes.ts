@@ -4,7 +4,7 @@
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { withUserContext } from "../auth/context.ts";
+import { type RequestContext, withRequestContext } from "../auth/context.ts";
 import type { AuthResult } from "../auth/oauth.ts";
 import { defaultRegistry } from "../mcp/registry.ts";
 import { createMcpServer } from "../server.ts";
@@ -38,6 +38,8 @@ interface SseSession {
   userId: string;
   writer: WritableStreamDefaultWriter<Uint8Array>;
   createdAt: number;
+  serverOrigin?: string;
+  token?: string;
 }
 
 const sseSessions = new Map<string, SseSession>();
@@ -66,6 +68,7 @@ export interface JsonRpcRequest {
 export async function processJsonRpcMessage(
   msg: JsonRpcRequest,
   userId: string,
+  requestContext?: Partial<RequestContext>,
 ): Promise<
   { jsonrpc: "2.0"; id?: string | number | null; result?: unknown; error?: unknown } | null
 > {
@@ -126,7 +129,11 @@ export async function processJsonRpcMessage(
     }
 
     try {
-      const toolResult = await withUserContext(userId, async () => {
+      const toolResult = await withRequestContext({
+        userId,
+        serverOrigin: requestContext?.serverOrigin,
+        token: requestContext?.token,
+      }, async () => {
         return await defaultRegistry.executeTool(toolName, toolArgs);
       });
 
@@ -183,16 +190,28 @@ export async function handleMcpRoutes(
 
     try {
       const rawBody = await req.json();
+      const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+        url.searchParams.get("token") || undefined;
+      const reqContext: Partial<RequestContext> = {
+        serverOrigin: url.origin,
+        token,
+      };
 
       if (Array.isArray(rawBody)) {
         const results = await Promise.all(
-          rawBody.map((item) => processJsonRpcMessage(item as JsonRpcRequest, auth.userId)),
+          rawBody.map((item) =>
+            processJsonRpcMessage(item as JsonRpcRequest, auth.userId, reqContext)
+          ),
         );
         const filtered = results.filter(Boolean);
         return jsonResponse(filtered);
       }
 
-      const result = await processJsonRpcMessage(rawBody as JsonRpcRequest, auth.userId);
+      const result = await processJsonRpcMessage(
+        rawBody as JsonRpcRequest,
+        auth.userId,
+        reqContext,
+      );
       if (!result) {
         return new Response(null, { status: 204, headers: CORS_HEADERS });
       }
@@ -215,6 +234,8 @@ export async function handleMcpRoutes(
       return errorResponse("Unauthorized: Missing or invalid authentication.", 401);
     }
 
+    const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+      url.searchParams.get("token") || undefined;
     const sessionId = crypto.randomUUID();
     const stream = new TransformStream<Uint8Array, Uint8Array>();
     const writer = stream.writable.getWriter();
@@ -224,6 +245,8 @@ export async function handleMcpRoutes(
       userId: auth.userId,
       writer,
       createdAt: Date.now(),
+      serverOrigin: url.origin,
+      token,
     };
     sseSessions.set(sessionId, session);
 
@@ -259,7 +282,10 @@ export async function handleMcpRoutes(
     const session = sseSessions.get(sessionId)!;
     try {
       const rawBody = await req.json();
-      const response = await processJsonRpcMessage(rawBody as JsonRpcRequest, session.userId);
+      const response = await processJsonRpcMessage(rawBody as JsonRpcRequest, session.userId, {
+        serverOrigin: session.serverOrigin,
+        token: session.token,
+      });
 
       if (response) {
         await sendSseEvent(session.writer, "message", JSON.stringify(response));

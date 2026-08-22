@@ -11,6 +11,7 @@ import {
   hydrateNodesWithExecution,
   renderMermaidFlowchart,
   requireExecution,
+  resolveNode,
   richResponse,
 } from "../helpers.ts";
 
@@ -18,8 +19,11 @@ const WorkflowNextArgsSchema = z.object({
   executionId: z.string().min(1).describe(
     "The unique execution ID returned by workflow_start. Identifies which concurrent run to advance.",
   ),
-  nodeId: z.string().min(1).describe(
-    "The ID of the node that finished execution or changed status.",
+  node: z.string().min(1).optional().describe(
+    "The ID, name, or slug of the node that finished execution or changed status.",
+  ),
+  nodeId: z.string().min(1).optional().describe(
+    "Alias for 'node'. The ID, name, or slug of the node that finished execution or changed status.",
   ),
   status: z.enum(["completed", "failed", "skipped"]).describe(
     "The execution outcome of the node ('completed', 'failed', or 'skipped').",
@@ -31,6 +35,8 @@ const WorkflowNextArgsSchema = z.object({
   format: z.enum(["markdown", "json", "both"]).optional().default("both").describe(
     "Optional output format. 'markdown' returns human-readable status, 'json' returns raw data, 'both' (default) returns multi-block annotated content for user and assistant.",
   ),
+}).refine((data) => data.node || data.nodeId, {
+  message: "Node ('node' or 'nodeId') must be provided.",
 });
 
 /**
@@ -140,28 +146,30 @@ function buildExecutionSummary(
 export const getNextStepTool = defineTool({
   name: "workflow_next",
   description:
-    "Core orchestration tool. Given an execution ID (from workflow_start) and the outcome of a completed node, updates the execution's node state, traverses outbound graph edges (resolving branch conditions for decision nodes), automatically marks reached 'end' nodes as completed, and returns the next actionable step(s) or signals workflow completion. Each concurrent execution is fully isolated — multiple projects can run the same workflow template simultaneously.",
+    "Core orchestration tool. Given an execution ID (from workflow_start) and the outcome of a completed node, updates the execution's node state, traverses outbound graph edges (resolving branch conditions for decision nodes), automatically marks reached 'end' nodes as completed, and returns the next actionable step(s) or signals workflow completion. Supports node UUIDs, exact names, or slugs. Each concurrent execution is fully isolated — multiple projects can run the same workflow template simultaneously.",
   schema: WorkflowNextArgsSchema,
-  execute: async ({ executionId, nodeId, status, error, decision, format }) => {
+  execute: async ({ executionId, node, nodeId, status, error, decision, format }) => {
     // Load the execution and its workflow graph
     const execCheck = await requireExecution(executionId);
     if ("error" in execCheck) return execCheck.error;
 
     const { execution, workflow, nodes, edges } = execCheck;
     const now = new Date().toISOString();
+    const targetNode = node ?? nodeId!;
 
     // Find the template node to get type info (name, type, config, etc.)
-    const templateNode = nodes.find((n) => n.id === nodeId);
+    const templateNode = resolveNode(targetNode, nodes);
     if (!templateNode) {
       return createErrorResponse(
-        `Node with ID "${nodeId}" not found in workflow "${workflow.id}".`,
+        `Node "${targetNode}" not found in workflow "${workflow.name}" (${workflow.id}). You can specify a node UUID, exact name, or slug.`,
       );
     }
+    const resolvedNodeId = templateNode.id;
 
     // Update this node's execution state
-    const prevState = execution.nodeStates[nodeId];
-    execution.nodeStates[nodeId] = {
-      nodeId,
+    const prevState = execution.nodeStates[resolvedNodeId];
+    execution.nodeStates[resolvedNodeId] = {
+      nodeId: resolvedNodeId,
       status,
       error: error ?? prevState?.error ?? null,
       iteration: prevState?.iteration ?? 1,
@@ -187,7 +195,10 @@ export const getNextStepTool = defineTool({
     );
 
     // Reflect the freshly updated current node in the map
-    const currentNode = { ...templateNode, ...execution.nodeStates[nodeId] } as WorkflowNode;
+    const currentNode = {
+      ...templateNode,
+      ...execution.nodeStates[resolvedNodeId],
+    } as WorkflowNode;
     nodeMap.set(currentNode.id, currentNode);
 
     if (status === "failed") {
@@ -220,7 +231,7 @@ export const getNextStepTool = defineTool({
       });
     }
 
-    const outboundEdges = edges.filter((e) => e.fromNodeId === nodeId);
+    const outboundEdges = edges.filter((e) => e.fromNodeId === resolvedNodeId);
     const edgeResolution = resolveEdgesToFollow(currentNode, outboundEdges, decision);
     if ("error" in edgeResolution) return edgeResolution.error;
 

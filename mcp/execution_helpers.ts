@@ -4,15 +4,8 @@
 
 import type { ToolCallResponse } from "./registry.ts";
 import { createErrorResponse } from "./registry.ts";
-import {
-  getExecution,
-  getNode,
-  getWorkflow,
-  listEdges,
-  listNodes,
-  saveExecution,
-  saveNodes,
-} from "../store/kv.ts";
+import { resolveNode, resolveWorkflow } from "./resolvers.ts";
+import { getExecution, listEdges, listNodes, saveExecution, saveNodes } from "../store/kv.ts";
 import type {
   ExecutionId,
   NodeExecutionState,
@@ -24,36 +17,40 @@ import type {
 } from "../store/types.ts";
 
 /**
- * Fetches a workflow or returns a formatted error response if not found.
+ * Fetches a workflow by UUID, name, or slug, returning a formatted error response if not found.
  */
 export async function requireWorkflow(
-  workflowId: string,
+  workflowIdOrSlug: string,
+  userId?: string,
 ): Promise<{ workflow: Workflow } | { error: ToolCallResponse }> {
-  const workflow = await getWorkflow(workflowId);
+  const workflow = await resolveWorkflow(workflowIdOrSlug, userId);
   if (!workflow) {
     return {
-      error: createErrorResponse(`Workflow with ID "${workflowId}" not found.`),
+      error: createErrorResponse(
+        `Workflow "${workflowIdOrSlug}" not found. You can specify a workflow UUID, exact name, or slug (e.g. "review-workflow" or "parent-workflow/child").`,
+      ),
     };
   }
   return { workflow };
 }
 
 /**
- * Fetches a workflow along with all its nodes and edges in parallel.
+ * Fetches a workflow along with all its nodes and edges in parallel, resolving by UUID, name, or slug.
  */
 export async function requireWorkflowGraph(
-  workflowId: string,
+  workflowIdOrSlug: string,
+  userId?: string,
 ): Promise<
   { workflow: Workflow; nodes: WorkflowNode[]; edges: WorkflowEdge[] } | {
     error: ToolCallResponse;
   }
 > {
-  const wfCheck = await requireWorkflow(workflowId);
+  const wfCheck = await requireWorkflow(workflowIdOrSlug, userId);
   if ("error" in wfCheck) return wfCheck;
 
   const [nodes, edges] = await Promise.all([
-    listNodes(workflowId),
-    listEdges(workflowId),
+    listNodes(wfCheck.workflow.id, { userId }),
+    listEdges(wfCheck.workflow.id, { userId }),
   ]);
 
   return { workflow: wfCheck.workflow, nodes, edges };
@@ -108,22 +105,30 @@ export async function requireExecution(executionId: ExecutionId): Promise<
 }
 
 /**
- * Fetches both a workflow and a specific node within it, returning a formatted error response if either is missing.
+ * Fetches both a workflow and a specific node within it by UUID, name, or slug.
  */
 export async function requireNode(
-  workflowId: string,
-  nodeId: string,
-): Promise<{ workflow: Workflow; node: WorkflowNode } | { error: ToolCallResponse }> {
-  const wfResult = await requireWorkflow(workflowId);
-  if ("error" in wfResult) return wfResult;
+  workflowIdOrSlug: string,
+  nodeIdOrSlug: string,
+  userId?: string,
+): Promise<
+  { workflow: Workflow; node: WorkflowNode; nodes: WorkflowNode[]; edges: WorkflowEdge[] } | {
+    error: ToolCallResponse;
+  }
+> {
+  const graphCheck = await requireWorkflowGraph(workflowIdOrSlug, userId);
+  if ("error" in graphCheck) return graphCheck;
 
-  const node = await getNode(workflowId, nodeId);
+  const { workflow, nodes, edges } = graphCheck;
+  const node = resolveNode(nodeIdOrSlug, nodes);
   if (!node) {
     return {
-      error: createErrorResponse(`Node with ID "${nodeId}" not found in workflow "${workflowId}".`),
+      error: createErrorResponse(
+        `Node "${nodeIdOrSlug}" not found in workflow "${workflow.name}" (${workflow.id}). You can specify a node UUID, exact name, or slug.`,
+      ),
     };
   }
-  return { workflow: wfResult.workflow, node };
+  return { workflow, node, nodes, edges };
 }
 
 /**

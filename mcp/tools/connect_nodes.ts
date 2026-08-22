@@ -1,19 +1,43 @@
 import { z } from "zod";
-import { getNode, listEdges, listNodes, saveEdge } from "../../store/kv.ts";
+import { listEdges, listNodes, saveEdge } from "../../store/kv.ts";
 import type { WorkflowEdge, WorkflowNode } from "../../store/types.ts";
 import { createErrorResponse, type ToolCallResponse } from "../registry.ts";
 import { wouldCreateCycle } from "../../validation/graph.ts";
 import { analyzeWorkflowSuggestions } from "../../validation/heuristics.ts";
-import { defineTool, jsonResponse, requireWorkflow } from "../helpers.ts";
+import { defineTool, jsonResponse, requireWorkflowGraph, resolveNode } from "../helpers.ts";
 
 const ConnectNodesSchema = z.object({
-  workflowId: z.string().min(1).describe("The unique identifier of the workflow."),
-  fromNodeId: z.string().min(1).describe("The ID of the source node where the edge originates."),
-  toNodeId: z.string().min(1).describe("The ID of the target node where the edge terminates."),
+  workflow: z.string().min(1).optional().describe(
+    "The unique identifier, name, or slug of the workflow.",
+  ),
+  workflowId: z.string().min(1).optional().describe(
+    "Alias for 'workflow'. The unique identifier, name, or slug of the workflow.",
+  ),
+  fromNode: z.string().min(1).optional().describe(
+    "The ID, name, or slug of the source node where the edge originates.",
+  ),
+  fromNodeId: z.string().min(1).optional().describe(
+    "Alias for 'fromNode'. The ID, name, or slug of the source node.",
+  ),
+  toNode: z.string().min(1).optional().describe(
+    "The ID, name, or slug of the target node where the edge terminates.",
+  ),
+  toNodeId: z.string().min(1).optional().describe(
+    "Alias for 'toNode'. The ID, name, or slug of the target node.",
+  ),
   condition: z.string().optional().describe(
     "Optional condition label for branching paths (e.g. from decision nodes).",
   ),
-});
+}).refine(
+  (data) =>
+    (data.workflow || data.workflowId) &&
+    (data.fromNode || data.fromNodeId) &&
+    (data.toNode || data.toNodeId),
+  {
+    message:
+      "Workflow ('workflow' or 'workflowId'), source node ('fromNode' or 'fromNodeId'), and target node ('toNode' or 'toNodeId') must be provided.",
+  },
+);
 
 /**
  * Validates connection constraints: node existence, start/end node edge rules, and duplicates.
@@ -51,11 +75,11 @@ function validateConnection(
   }
 
   const isDuplicate = existingEdges.some(
-    (edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId,
+    (edge) => edge.fromNodeId === fromNode.id && edge.toNodeId === toNode.id,
   );
   if (isDuplicate) {
     return createErrorResponse(
-      `An edge already exists from node "${fromNode.name}" (${fromNodeId}) to node "${toNode.name}" (${toNodeId}).`,
+      `An edge already exists from node "${fromNode.name}" (${fromNode.id}) to node "${toNode.name}" (${toNode.id}).`,
     );
   }
 
@@ -65,35 +89,45 @@ function validateConnection(
 export const connectNodesTool = defineTool({
   name: "node_connect",
   description:
-    "Creates a directed edge from one node to another within a workflow graph. Supports linear connections, conditional branching, and feedback loops (cycles). Prevents inbound edges to start nodes, outbound edges from end nodes, and duplicate edges.",
+    "Creates a directed edge from one node to another within a workflow graph. Supports workflow and node UUIDs, exact names, or slugs. Supports linear connections, conditional branching, and feedback loops (cycles). Prevents inbound edges to start nodes, outbound edges from end nodes, and duplicate edges.",
   schema: ConnectNodesSchema,
-  execute: async ({ workflowId, fromNodeId, toNodeId, condition }) => {
-    const wfCheck = await requireWorkflow(workflowId);
-    if ("error" in wfCheck) return wfCheck.error;
+  execute: async ({
+    workflow,
+    workflowId,
+    fromNode,
+    fromNodeId,
+    toNode,
+    toNodeId,
+    condition,
+  }) => {
+    const targetWorkflow = workflow ?? workflowId!;
+    const fromTarget = fromNode ?? fromNodeId!;
+    const toTarget = toNode ?? toNodeId!;
 
-    const [fromNode, toNode, existingEdges] = await Promise.all([
-      getNode(workflowId, fromNodeId),
-      getNode(workflowId, toNodeId),
-      listEdges(workflowId),
-    ]);
+    const graphCheck = await requireWorkflowGraph(targetWorkflow);
+    if ("error" in graphCheck) return graphCheck.error;
+
+    const { workflow: wf, nodes, edges: existingEdges } = graphCheck;
+    const resolvedFrom = resolveNode(fromTarget, nodes);
+    const resolvedTo = resolveNode(toTarget, nodes);
 
     const validationError = validateConnection(
-      workflowId,
-      fromNodeId,
-      toNodeId,
-      fromNode,
-      toNode,
+      wf.id,
+      fromTarget,
+      toTarget,
+      resolvedFrom,
+      resolvedTo,
       existingEdges,
     );
     if (validationError) return validationError;
 
-    const createsLoop = wouldCreateCycle(fromNodeId, toNodeId, existingEdges);
+    const createsLoop = wouldCreateCycle(resolvedFrom!.id, resolvedTo!.id, existingEdges);
 
     const newEdge: WorkflowEdge = {
       id: crypto.randomUUID(),
-      workflowId,
-      fromNodeId,
-      toNodeId,
+      workflowId: wf.id,
+      fromNodeId: resolvedFrom!.id,
+      toNodeId: resolvedTo!.id,
       ...(condition !== undefined && condition.trim() !== ""
         ? { condition: condition.trim() }
         : {}),
@@ -102,24 +136,24 @@ export const connectNodesTool = defineTool({
     await saveEdge(newEdge);
 
     const warnings: string[] = [];
-    if (fromNode!.type === "decision" && (!condition || condition.trim() === "")) {
+    if (resolvedFrom!.type === "decision" && (!condition || condition.trim() === "")) {
       warnings.push(
-        `Source node "${
-          fromNode!.name
-        }" (${fromNodeId}) is a decision node, but no condition was specified for this edge. Decision node outbound edges should typically specify a condition.`,
+        `Source node "${resolvedFrom!.name}" (${
+          resolvedFrom!.id
+        }) is a decision node, but no condition was specified for this edge. Decision node outbound edges should typically specify a condition.`,
       );
     }
     if (createsLoop) {
       warnings.push(
-        `This edge creates a feedback loop / cycle from "${fromNode!.name}" to "${
-          toNode!.name
+        `This edge creates a feedback loop / cycle from "${resolvedFrom!.name}" to "${
+          resolvedTo!.name
         }". Ensure the loop is gated with a decision node and an exit path to pass validation.`,
       );
     }
 
     const [allNodes, allEdges] = await Promise.all([
-      listNodes(workflowId),
-      listEdges(workflowId),
+      listNodes(wf.id),
+      listEdges(wf.id),
     ]);
     const suggestions = analyzeWorkflowSuggestions(allNodes, allEdges);
 

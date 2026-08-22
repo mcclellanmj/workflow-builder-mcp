@@ -2,14 +2,26 @@ import { z } from "zod";
 import { getKv, resolveUserId } from "../../store/kv.ts";
 import type { Workflow, WorkflowEdge, WorkflowNode } from "../../store/types.ts";
 import { createErrorResponse } from "../registry.ts";
-import { defineTool, jsonResponse, requireWorkflowGraph } from "../helpers.ts";
+import { defineTool, jsonResponse, requireWorkflowGraph, resolveNode } from "../helpers.ts";
 
 const ExtractSubworkflowSchema = z.object({
-  parentWorkflowId: z.string().min(1).describe(
-    "The ID of the parent workflow from which nodes will be extracted.",
+  parentWorkflow: z.string().min(1).optional().describe(
+    "The ID, name, or slug of the parent workflow from which nodes will be extracted.",
   ),
-  nodeIds: z.array(z.string().min(1)).min(1).describe(
-    "The array of node IDs in the parent workflow to extract into a child sub-workflow.",
+  parentWorkflowId: z.string().min(1).optional().describe(
+    "Alias for 'parentWorkflow'. The ID, name, or slug of the parent workflow.",
+  ),
+  workflow: z.string().min(1).optional().describe(
+    "Alias for 'parentWorkflow'.",
+  ),
+  workflowId: z.string().min(1).optional().describe(
+    "Alias for 'parentWorkflow'.",
+  ),
+  nodes: z.array(z.string().min(1)).min(1).optional().describe(
+    "The array of node IDs, names, or slugs in the parent workflow to extract into a child sub-workflow.",
+  ),
+  nodeIds: z.array(z.string().min(1)).min(1).optional().describe(
+    "Alias for 'nodes'. The array of node IDs, names, or slugs in the parent workflow to extract into a child sub-workflow.",
   ),
   subworkflowName: z.string().min(1).describe(
     "The name for the newly created child sub-workflow.",
@@ -20,46 +32,66 @@ const ExtractSubworkflowSchema = z.object({
   subworkflowNodeName: z.string().optional().describe(
     "Optional name for the subworkflow node in the parent workflow (defaults to subworkflowName).",
   ),
-});
+}).refine(
+  (data) =>
+    (data.parentWorkflow || data.parentWorkflowId || data.workflow || data.workflowId) &&
+    (data.nodes || data.nodeIds),
+  {
+    message:
+      "Parent workflow ('parentWorkflow' or 'parentWorkflowId') and nodes ('nodes' or 'nodeIds') must be provided.",
+  },
+);
 
 export const extractSubworkflowTool = defineTool({
   name: "workflow_extract_subworkflow",
   description:
-    "Refactors an existing workflow by extracting a specified set of nodes into a new child sub-workflow. Automatically creates the child workflow (flagged with intendedForIndependentRun: false), creates start/end boundaries inside the child workflow, replaces the extracted nodes in the parent workflow with a single 'subworkflow' node, and rewires all inbound/outbound connections.",
+    "Refactors an existing workflow by extracting a specified set of nodes into a new child sub-workflow. Supports workflow and node UUIDs, exact names, or slugs. Automatically creates the child workflow (flagged with intendedForIndependentRun: false), creates start/end boundaries inside the child workflow, replaces the extracted nodes in the parent workflow with a single 'subworkflow' node, and rewires all inbound/outbound connections.",
   schema: ExtractSubworkflowSchema,
   execute: async ({
+    parentWorkflow,
     parentWorkflowId,
+    workflow,
+    workflowId,
+    nodes,
     nodeIds,
     subworkflowName,
     subworkflowDescription,
     subworkflowNodeName,
   }) => {
-    const graphCheck = await requireWorkflowGraph(parentWorkflowId);
+    const targetParentWf = parentWorkflow ?? parentWorkflowId ?? workflow ?? workflowId!;
+    const rawTargetNodes = nodes ?? nodeIds!;
+
+    const graphCheck = await requireWorkflowGraph(targetParentWf);
     if ("error" in graphCheck) return graphCheck.error;
 
-    const { nodes: parentNodes, edges: parentEdges } = graphCheck;
+    const { workflow: parentWf, nodes: parentNodes, edges: parentEdges } = graphCheck;
+    const actualParentWfId = parentWf.id;
     const parentNodeMap = new Map(parentNodes.map((n) => [n.id, n]));
-    const targetNodeIdSet = new Set(nodeIds);
 
-    // Validation: Ensure all target nodes exist and don't include start/end of parent
-    for (const nodeId of nodeIds) {
-      const node = parentNodeMap.get(nodeId);
-      if (!node) {
+    // Resolve node IDs from names, slugs, or UUIDs
+    const resolvedNodeIds: string[] = [];
+    for (const rawIdentifier of rawTargetNodes) {
+      const matchedNode = resolveNode(rawIdentifier, parentNodes);
+      if (!matchedNode) {
         return createErrorResponse(
-          `Node "${nodeId}" not found in parent workflow "${parentWorkflowId}".`,
+          `Node "${rawIdentifier}" not found in parent workflow "${parentWf.name}" (${actualParentWfId}).`,
         );
       }
-      if (node.type === "start") {
+      if (matchedNode.type === "start") {
         return createErrorResponse(
           "Cannot extract the parent workflow's 'start' node into a sub-workflow.",
         );
       }
-      if (node.type === "end") {
+      if (matchedNode.type === "end") {
         return createErrorResponse(
           "Cannot extract the parent workflow's 'end' node into a sub-workflow.",
         );
       }
+      resolvedNodeIds.push(matchedNode.id);
     }
+
+    const targetNodeIdSet = new Set(resolvedNodeIds);
+    const resolvedNodeList = resolvedNodeIds;
 
     const now = new Date().toISOString();
     const childWorkflowId = crypto.randomUUID();
@@ -90,14 +122,14 @@ export const extractSubworkflowTool = defineTool({
     // If no inbound external edges, fall back to any target node without incoming internal edges
     if (entryNodeIds.size === 0) {
       const targetNodesWithInbound = new Set(internalEdges.map((e) => e.toNodeId));
-      for (const id of nodeIds) {
+      for (const id of resolvedNodeList) {
         if (!targetNodesWithInbound.has(id)) {
           entryNodeIds.add(id);
         }
       }
       // If still empty (e.g. cycle), pick the first node
-      if (entryNodeIds.size === 0 && nodeIds.length > 0) {
-        entryNodeIds.add(nodeIds[0]);
+      if (entryNodeIds.size === 0 && resolvedNodeList.length > 0) {
+        entryNodeIds.add(resolvedNodeList[0]);
       }
     }
 
@@ -108,13 +140,13 @@ export const extractSubworkflowTool = defineTool({
     // If no outbound external edges, fall back to any target node without outgoing internal edges
     if (exitNodeIds.size === 0) {
       const targetNodesWithOutbound = new Set(internalEdges.map((e) => e.fromNodeId));
-      for (const id of nodeIds) {
+      for (const id of resolvedNodeList) {
         if (!targetNodesWithOutbound.has(id)) {
           exitNodeIds.add(id);
         }
       }
-      if (exitNodeIds.size === 0 && nodeIds.length > 0) {
-        exitNodeIds.add(nodeIds[nodeIds.length - 1]);
+      if (exitNodeIds.size === 0 && resolvedNodeList.length > 0) {
+        exitNodeIds.add(resolvedNodeList[resolvedNodeList.length - 1]);
       }
     }
 
@@ -161,7 +193,7 @@ export const extractSubworkflowTool = defineTool({
     const idMap = new Map<string, string>();
     const childMigratedNodes: WorkflowNode[] = [];
 
-    for (const nodeId of nodeIds) {
+    for (const nodeId of resolvedNodeList) {
       const parentNode = parentNodeMap.get(nodeId)!;
       const childNodeId = crypto.randomUUID();
       idMap.set(nodeId, childNodeId);
@@ -221,7 +253,7 @@ export const extractSubworkflowTool = defineTool({
     const parentSubworkflowNodeId = crypto.randomUUID();
     const parentSubworkflowNode: WorkflowNode = {
       id: parentSubworkflowNodeId,
-      workflowId: parentWorkflowId,
+      workflowId: actualParentWfId,
       type: "subworkflow",
       name: subworkflowNodeName ?? subworkflowName,
       description: subworkflowDescription ?? `Executes sub-workflow "${subworkflowName}"`,
@@ -245,7 +277,7 @@ export const extractSubworkflowTool = defineTool({
         seenParentEdgeKeys.add(edgeKey);
         newParentEdges.push({
           id: crypto.randomUUID(),
-          workflowId: parentWorkflowId,
+          workflowId: actualParentWfId,
           fromNodeId: edge.fromNodeId,
           toNodeId: parentSubworkflowNodeId,
           ...(edge.condition ? { condition: edge.condition } : {}),
@@ -259,7 +291,7 @@ export const extractSubworkflowTool = defineTool({
         seenParentEdgeKeys.add(edgeKey);
         newParentEdges.push({
           id: crypto.randomUUID(),
-          workflowId: parentWorkflowId,
+          workflowId: actualParentWfId,
           fromNodeId: parentSubworkflowNodeId,
           toNodeId: edge.toNodeId,
           ...(edge.condition ? { condition: edge.condition } : {}),
@@ -298,25 +330,25 @@ export const extractSubworkflowTool = defineTool({
     }
 
     // Delete extracted parent nodes & their subworkflow_refs if any
-    for (const nodeId of nodeIds) {
-      atomic.delete(["users", uid, "nodes", parentWorkflowId, nodeId]);
+    for (const nodeId of resolvedNodeList) {
+      atomic.delete(["users", uid, "nodes", actualParentWfId, nodeId]);
       const nodeObj = parentNodeMap.get(nodeId);
       if (nodeObj?.type === "subworkflow" && typeof nodeObj.config?.childWorkflowId === "string") {
         const cId = (nodeObj.config.childWorkflowId as string).trim();
         if (cId) {
-          atomic.delete(["users", uid, "subworkflow_refs", cId, parentWorkflowId, nodeId]);
+          atomic.delete(["users", uid, "subworkflow_refs", cId, actualParentWfId, nodeId]);
         }
       }
     }
 
     // Delete extracted / obsolete parent edges
     for (const edge of [...internalEdges, ...inboundExternalEdges, ...outboundExternalEdges]) {
-      atomic.delete(["users", uid, "edges", parentWorkflowId, edge.id]);
+      atomic.delete(["users", uid, "edges", actualParentWfId, edge.id]);
     }
 
     // Save replacement subworkflow node in parent and register subworkflow ref index
     atomic.set(
-      ["users", uid, "nodes", parentWorkflowId, parentSubworkflowNode.id],
+      ["users", uid, "nodes", actualParentWfId, parentSubworkflowNode.id],
       parentSubworkflowNode,
     );
     atomic.set(
@@ -325,7 +357,7 @@ export const extractSubworkflowTool = defineTool({
         uid,
         "subworkflow_refs",
         childWorkflowId,
-        parentWorkflowId,
+        actualParentWfId,
         parentSubworkflowNode.id,
       ],
       true,
@@ -334,7 +366,7 @@ export const extractSubworkflowTool = defineTool({
     // Save new parent rewired edges
     for (const edge of newParentEdges) {
       edge.userId = uid;
-      atomic.set(["users", uid, "edges", parentWorkflowId, edge.id], edge);
+      atomic.set(["users", uid, "edges", actualParentWfId, edge.id], edge);
     }
 
     const commitResult = await atomic.commit();
@@ -346,7 +378,7 @@ export const extractSubworkflowTool = defineTool({
 
     return jsonResponse({
       message:
-        `Successfully extracted ${nodeIds.length} nodes into sub-workflow "${subworkflowName}".`,
+        `Successfully extracted ${resolvedNodeList.length} nodes into sub-workflow "${subworkflowName}".`,
       childWorkflow: {
         id: childWorkflow.id,
         name: childWorkflow.name,

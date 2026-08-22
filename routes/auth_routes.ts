@@ -25,12 +25,21 @@ export async function handleAuthRoutes(req: Request, url: URL): Promise<Response
       return errorResponse("Username is required for registration.", 400);
     }
 
-    const { options, challengeId } = await createPasskeyRegistrationOptions(
-      url.hostname,
-      username,
-      displayName,
-    );
-    return jsonResponse({ options, challengeId });
+    try {
+      const { options, challengeId } = await createPasskeyRegistrationOptions(
+        url.hostname,
+        username,
+        displayName,
+      );
+      return jsonResponse({ options, challengeId });
+    } catch (err) {
+      const isConflict = (err as Error & { code?: string })?.code === "USER_EXISTS" ||
+        (err instanceof Error && err.message.includes("already taken"));
+      return errorResponse(
+        err instanceof Error ? err.message : String(err),
+        isConflict ? 409 : 400,
+      );
+    }
   }
 
   // Passkey Registration Verify

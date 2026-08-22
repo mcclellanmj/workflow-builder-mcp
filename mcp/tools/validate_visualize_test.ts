@@ -315,23 +315,38 @@ Deno.test("visualizeWorkflowTool - exports interactive HTML with subworkflows, p
     assert(summaryMd.includes("Interactive Workflow Visualizer Generated"));
     assert(summaryMd.includes("Saved File"));
     assert(summaryMd.includes("**Subworkflows Bundled**: 1"));
+    assert(summaryMd.includes("Live Shareable Link (Valid for 1 week)"));
+    assert(summaryMd.includes("?ticket="));
 
-    // 5. Verify HTML file exists and contains expected interactive features & embedded data
+    // 5. Verify HTML file exists and contains SSR SVG, interactive features & zero CDNs
     const fileStat = await Deno.stat(testHtmlFile);
     assert(fileStat.isFile);
     assert(fileStat.size > 1000);
 
     const htmlContent = await Deno.readTextFile(testHtmlFile);
     assert(htmlContent.includes("<!DOCTYPE html>"));
-    assert(htmlContent.includes("cytoscape"));
+    assert(htmlContent.includes('id="cy"'));
+    assert(htmlContent.includes("workflow-bundle"));
     assert(htmlContent.includes("Main Pipeline"));
     assert(htmlContent.includes("Data Extraction Subworkflow"));
     assert(htmlContent.includes("Extract JSON documents from raw payloads"));
     assert(htmlContent.includes("insp-drilldown-btn"));
     assert(htmlContent.includes("insp-prompt"));
     assert(htmlContent.includes("lock-toggle-btn"));
-    assert(htmlContent.includes("nodesLocked"));
-    assert(htmlContent.includes("autoungrabify"));
+    // Zero external CDN scripts (bundled directly from dependencies)
+    assert(!htmlContent.includes("cdnjs.cloudflare.com"));
+    assert(!htmlContent.includes("cdn.jsdelivr.net"));
+
+    // 6. Test custom expiration duration up to 1 year
+    const vis1YearRes = await visualizeWorkflowTool.execute({
+      workflowId: parentWf.id,
+      format: "url",
+      expiresInDays: 365,
+    });
+    assert(!vis1YearRes.isError);
+    const oneYearText = vis1YearRes.content[0].text;
+    assert(oneYearText.includes("Valid for 1 year"));
+    assert(oneYearText.includes("?ticket="));
   } finally {
     try {
       await Deno.remove(testHtmlFile);

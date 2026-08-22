@@ -69,7 +69,8 @@ function base64UrlToUint8Array(base64url: string): Uint8Array {
 }
 
 /**
- * Generates WebAuthn registration options for creating a new Passkey.
+ * Generates WebAuthn registration options for creating a brand new user Passkey.
+ * Rejects if the username is already registered to prevent account takeover.
  */
 export async function createPasskeyRegistrationOptions(
   rpID: string,
@@ -83,9 +84,72 @@ export async function createPasskeyRegistrationOptions(
   const kv = await getKv();
   const cleanUsername = username.trim().toLowerCase();
 
-  // Find existing userId or create new one
+  // Reject if username already exists to prevent unauthenticated account hijacking
   const userEntry = await kv.get<string>(["users_by_username", cleanUsername]);
-  const userId = userEntry.value || ("user_" + crypto.randomUUID().slice(0, 8));
+  if (userEntry.value) {
+    const error = new Error(
+      `Username "${cleanUsername}" is already taken. Please sign in instead.`,
+    );
+    (error as Error & { code?: string }).code = "USER_EXISTS";
+    throw error;
+  }
+
+  const userId = "user_" + crypto.randomUUID().slice(0, 8);
+
+  const options = await generateRegistrationOptions({
+    rpName: "Workflow MCP",
+    rpID,
+    userID: new TextEncoder().encode(userId),
+    userName: cleanUsername,
+    userDisplayName: displayName?.trim() || username.trim(),
+    attestationType: "none",
+    authenticatorSelection: {
+      residentKey: "preferred",
+      userVerification: "preferred",
+    },
+  });
+
+  const challengeId = crypto.randomUUID();
+  const challengeRecord: StoredChallenge = {
+    challenge: options.challenge,
+    userId,
+    username: cleanUsername,
+    createdAt: Date.now(),
+  };
+
+  // Store challenge with a 5-minute TTL
+  await kv.set(["challenges", challengeId], challengeRecord, { expireIn: 300_000 });
+
+  return {
+    options: options as unknown as Record<string, unknown>,
+    challengeId,
+  };
+}
+
+/**
+ * Generates WebAuthn registration options for an already authenticated user
+ * to associate an additional Passkey / hardware security key to their account.
+ */
+export async function createAddPasskeyOptions(
+  rpID: string,
+  userId: string,
+): Promise<{ options: Record<string, unknown>; challengeId: string }> {
+  if (!userId || typeof userId !== "string" || userId.trim().length === 0) {
+    throw new Error("User ID is required.");
+  }
+
+  const kv = await getKv();
+  const profileEntry = await kv.get<UserPasskeyProfile | { name?: string; email?: string }>([
+    "users",
+    userId,
+    "profile",
+  ]);
+  const username = (profileEntry.value as UserPasskeyProfile)?.username ||
+    (profileEntry.value as { name?: string })?.name ||
+    userId;
+  const displayName = (profileEntry.value as UserPasskeyProfile)?.displayName ||
+    (profileEntry.value as { name?: string })?.name ||
+    username;
 
   // Get existing user passkeys to exclude re-registering the same key
   const existingPasskeys: Array<{ id: string; transports?: AuthenticatorTransportFuture[] }> = [];
@@ -102,8 +166,8 @@ export async function createPasskeyRegistrationOptions(
     rpName: "Workflow MCP",
     rpID,
     userID: new TextEncoder().encode(userId),
-    userName: cleanUsername,
-    userDisplayName: displayName?.trim() || username.trim(),
+    userName: username,
+    userDisplayName: displayName,
     attestationType: "none",
     excludeCredentials: existingPasskeys,
     authenticatorSelection: {
@@ -116,7 +180,7 @@ export async function createPasskeyRegistrationOptions(
   const challengeRecord: StoredChallenge = {
     challenge: options.challenge,
     userId,
-    username: cleanUsername,
+    username,
     createdAt: Date.now(),
   };
 
@@ -190,12 +254,13 @@ export async function verifyPasskeyRegistration(
       createdAt: new Date().toISOString(),
     };
 
+    const existingProfile = (await kv.get<UserPasskeyProfile>(["users", userId, "profile"])).value;
     const count = await existingPasskeyCount(kv, userId);
     const userProfile: UserPasskeyProfile = {
       userId,
       username,
-      displayName: username,
-      createdAt: new Date().toISOString(),
+      displayName: existingProfile?.displayName || username,
+      createdAt: existingProfile?.createdAt || new Date().toISOString(),
       passkeyCount: count + 1,
     };
 
@@ -371,4 +436,47 @@ export async function listUserPasskeys(userId: string): Promise<StoredPasskey[]>
     }
   }
   return passkeys;
+}
+
+/**
+ * Revokes / deletes an individual Passkey for a user.
+ * Prevents deleting the only remaining passkey on an account.
+ */
+export async function deleteUserPasskey(
+  userId: string,
+  credentialId: string,
+): Promise<{ success: boolean; error?: string }> {
+  if (!userId || !credentialId) {
+    return { success: false, error: "Missing userId or credentialId." };
+  }
+
+  const kv = await getKv();
+  const keyEntry = await kv.get<StoredPasskey>(["users", userId, "passkeys", credentialId]);
+  if (!keyEntry.value) {
+    return { success: false, error: "Passkey not found on this account." };
+  }
+
+  const passkeys = await listUserPasskeys(userId);
+  if (passkeys.length <= 1) {
+    return {
+      success: false,
+      error: "Cannot delete the only registered passkey on this account.",
+    };
+  }
+
+  const profileEntry = await kv.get<UserPasskeyProfile>(["users", userId, "profile"]);
+  const atomic = kv.atomic()
+    .delete(["users", userId, "passkeys", credentialId])
+    .delete(["passkeys_by_id", credentialId]);
+
+  if (profileEntry.value) {
+    const updatedProfile: UserPasskeyProfile = {
+      ...profileEntry.value,
+      passkeyCount: Math.max(1, passkeys.length - 1),
+    };
+    atomic.set(["users", userId, "profile"], updatedProfile);
+  }
+
+  await atomic.commit();
+  return { success: true };
 }

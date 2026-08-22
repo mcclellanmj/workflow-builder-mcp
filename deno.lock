@@ -17,6 +17,9 @@
     "npm:@modelcontextprotocol/sdk@^1.29.0": "1.29.0_zod@3.25.76",
     "npm:@simplewebauthn/server@10": "10.0.1",
     "npm:@simplewebauthn/types@10": "10.0.0",
+    "npm:cytoscape-dagre@^2.5.0": "2.5.0_cytoscape@3.34.1",
+    "npm:cytoscape@^3.30.2": "3.34.1",
+    "npm:dagre@~0.8.5": "0.8.5",
     "npm:zod@^3.23.0": "3.25.76"
   },
   "jsr": {
@@ -288,6 +291,23 @@
         "which"
       ]
     },
+    "cytoscape-dagre@2.5.0_cytoscape@3.34.1": {
+      "integrity": "sha512-VG2Knemmshop4kh5fpLO27rYcyUaaDkRw+6PiX4bstpB+QFt0p2oauMrsjVbUamGWQ6YNavh7x2em2uZlzV44g==",
+      "dependencies": [
+        "cytoscape",
+        "dagre"
+      ]
+    },
+    "cytoscape@3.34.1": {
+      "integrity": "sha512-Lr0RvH9H75y9ar8h9Toy6u4lxRSCcxUq+hHcQ26sVWo6BnaQp1gwEZOYqwuYTZhyW7npyKnNLP8oJ2p1/3OZ7g=="
+    },
+    "dagre@0.8.5": {
+      "integrity": "sha512-/aTqmnRta7x7MCCpExk7HQL2O4owCT2h8NT//9I1OQ9vt29Pa0BzSAkR5lwFUcQ7491yVi/3CXU9jQ5o0Mn2Sw==",
+      "dependencies": [
+        "graphlib",
+        "lodash"
+      ]
+    },
     "debug@4.4.3": {
       "integrity": "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA==",
       "dependencies": [
@@ -430,6 +450,12 @@
     "gopd@1.2.0": {
       "integrity": "sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg=="
     },
+    "graphlib@2.1.8": {
+      "integrity": "sha512-jcLLfkpoVGmH7/InMC/1hIvOPSUh38oJtGhvrOFGzioE1DZ+0YW16RgmOJhHiuWTvGiJQ9Z1Ik43JvkRPRvE+A==",
+      "dependencies": [
+        "lodash"
+      ]
+    },
     "has-symbols@1.1.0": {
       "integrity": "sha512-1cDNdwJ2Jaohmb3sg4OmKaMBwuC48sYni5HUw2DvsC8LjGTLK9h+eb1X6RyuOHe4hT0ULCW68iomhjUoKUqlPQ=="
     },
@@ -481,6 +507,9 @@
     },
     "json-schema-typed@8.0.2": {
       "integrity": "sha512-fQhoXdcvc3V28x7C7BMs4P5+kNlgUURe2jmUT1T//oBRMDrqy1QPelJimwZGo7Hg9VPV3EQV5Bnq4hbFy2vetA=="
+    },
+    "lodash@4.18.1": {
+      "integrity": "sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q=="
     },
     "math-intrinsics@1.1.0": {
       "integrity": "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="
@@ -729,6 +758,9 @@
       "npm:@modelcontextprotocol/sdk@^1.29.0",
       "npm:@simplewebauthn/server@10",
       "npm:@simplewebauthn/types@10",
+      "npm:cytoscape-dagre@^2.5.0",
+      "npm:cytoscape@^3.30.2",
+      "npm:dagre@~0.8.5",
       "npm:zod@^3.23.0"
     ]
   }

@@ -21,6 +21,9 @@ import { visualizeWorkflowTool } from "./visualize_workflow.ts";
 import { extractSubworkflowTool } from "./extract_subworkflow.ts";
 import { exportWorkflowTool } from "./export_workflow.ts";
 import { importWorkflowTool } from "./import_workflow.ts";
+import { searchWorkflowTool } from "./search_workflow.ts";
+import { workflowPatchTool } from "./patch_workflow.ts";
+import { workflowTreeTool } from "./tree_workflow.ts";
 
 import type { McpTool } from "../registry.ts";
 
@@ -41,9 +44,13 @@ export {
   listNodesTool,
   listWorkflowsTool,
   resetWorkflowTool,
+  searchWorkflowTool,
+  searchWorkflowTool as workflowSearchTool,
   startWorkflowTool,
   validateWorkflowTool,
   visualizeWorkflowTool,
+  workflowPatchTool,
+  workflowTreeTool,
 };
 
 export const allTools: McpTool[] = [
@@ -66,4 +73,7 @@ export const allTools: McpTool[] = [
   extractSubworkflowTool,
   exportWorkflowTool,
   importWorkflowTool,
+  searchWorkflowTool,
+  workflowPatchTool,
+  workflowTreeTool,
 ];
