@@ -22,6 +22,7 @@ import {
   handleMcpRoutes,
   processJsonRpcMessage,
 } from "./routes/mcp_routes.ts";
+import { handleOAuthServerRoutes } from "./routes/oauth_server_routes.ts";
 import { handlePasskeyManagementRoutes } from "./routes/passkey_routes.ts";
 import { handleStaticRoutes } from "./routes/static_routes.ts";
 import { handleTokenRoutes } from "./routes/token_routes.ts";
@@ -57,34 +58,34 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
     });
   }
 
-  // 2. Auth Routes (Passkey WebAuthn & OAuth)
+  // 2. Auth Routes (Passkey WebAuthn & OAuth Provider Signin)
   const authRes = await handleAuthRoutes(req, url);
   if (authRes) return authRes;
 
   // 3. Resolve Authentication (Bearer Token, Session Cookie, or Header Auth)
   const auth = await authenticateRequest(req);
 
-  // 4. Authenticated Passkey Management Routes (/api/passkeys/*)
-  if (auth) {
-    const passkeyRes = await handlePasskeyManagementRoutes(req, url, auth);
-    if (passkeyRes) return passkeyRes;
-  }
+  // 4. OAuth 2.1 Server Routes (RFC 9728 Discovery, RFC 8414 Metadata, Authorize, Token, Register)
+  const oauthServerRes = await handleOAuthServerRoutes(req, url, auth);
+  if (oauthServerRes) return oauthServerRes;
 
-  // 5. Token Routes
-  if (auth) {
-    const tokenRes = await handleTokenRoutes(req, url, auth);
-    if (tokenRes) return tokenRes;
-  }
+  // 5. Passkey Management Routes (/api/passkeys/*)
+  const passkeyRes = await handlePasskeyManagementRoutes(req, url, auth);
+  if (passkeyRes) return passkeyRes;
 
-  // 5. MCP Routes (Stateless JSON-RPC and Streamable SSE)
+  // 6. Token Routes (/api/token, /api/tokens/*)
+  const tokenRes = await handleTokenRoutes(req, url, auth);
+  if (tokenRes) return tokenRes;
+
+  // 7. MCP Routes (Stateless JSON-RPC and Streamable SSE)
   const mcpRes = await handleMcpRoutes(req, url, auth);
   if (mcpRes) return mcpRes;
 
-  // 6. Visualization & Share Ticket Routes (/visualize/*, /api/visualize/*)
+  // 8. Visualization & Share Ticket Routes (/visualize/*, /api/visualize/*)
   const visRes = await handleVisualizeRoutes(req, url, auth);
   if (visRes) return visRes;
 
-  // 7. Static / Discovery / Health / Profile Routes
+  // 9. Static / Discovery / Health / Profile Routes
   const staticRes = await handleStaticRoutes(req, url, auth);
   if (staticRes) return staticRes;
 

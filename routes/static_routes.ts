@@ -5,7 +5,7 @@
 import { getOAuthConfig } from "../auth/oauth.ts";
 import type { AuthResult } from "../auth/oauth.ts";
 import { listUserPasskeys } from "../auth/passkey.ts";
-import { errorResponse, jsonResponse } from "./common.ts";
+import { errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
 
 export function renderDashboardHtml(origin: string): string {
   return `<!DOCTYPE html>
@@ -562,7 +562,11 @@ export async function handleStaticRoutes(
   // User Profile Endpoint
   if (path === "/api/me" && method === "GET") {
     if (!auth) {
-      return errorResponse("Unauthorized. Please log in or provide Bearer token.", 401);
+      return errorResponse(
+        "Unauthorized. Please log in or provide Bearer token.",
+        401,
+        getWwwAuthenticateHeader(url.origin),
+      );
     }
     const passkeys = await listUserPasskeys(auth.userId);
     return jsonResponse({

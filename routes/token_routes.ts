@@ -4,15 +4,27 @@
 
 import type { AuthResult } from "../auth/oauth.ts";
 import { createApiToken, listApiTokens, revokeApiToken } from "../auth/oauth.ts";
-import { errorResponse, jsonResponse } from "./common.ts";
+import { errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
 
 export async function handleTokenRoutes(
   req: Request,
   url: URL,
-  auth: AuthResult,
+  auth: AuthResult | null,
 ): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method.toUpperCase();
+
+  const isTokenRoute = path === "/api/token" || path === "/api/tokens" ||
+    path.startsWith("/api/tokens/");
+  if (!isTokenRoute) return null;
+
+  if (!auth) {
+    return errorResponse(
+      "Unauthorized. Please log in or provide Bearer token.",
+      401,
+      getWwwAuthenticateHeader(url.origin),
+    );
+  }
 
   if (path === "/api/token" && method === "POST") {
     const body = await req.json().catch(() => ({}));

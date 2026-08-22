@@ -8,7 +8,7 @@ import { generateSsrVisualizerHtml } from "../mcp/ssr_visualizer.ts";
 import { exportWorkflowBundle, getExecution, getViewTicket } from "../store/kv.ts";
 import type { ViewTicket } from "../store/types.ts";
 import { hydrateNodesWithExecution } from "../mcp/helpers.ts";
-import { CORS_HEADERS, errorResponse, jsonResponse } from "./common.ts";
+import { CORS_HEADERS, errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
 
 function renderExpiredTicketHtml(origin: string): string {
   return `<!DOCTYPE html>
@@ -184,11 +184,19 @@ export async function handleVisualizeRoutes(
     const effectiveAuth = auth || (await authenticateRequest(req));
     if (!effectiveAuth) {
       if (isApiData) {
-        return errorResponse("Unauthorized. Provide token or ticket.", 401);
+        return errorResponse(
+          "Unauthorized. Provide token or ticket.",
+          401,
+          getWwwAuthenticateHeader(url.origin),
+        );
       }
       return new Response(renderUnauthorizedHtml(url.origin), {
         status: 401,
-        headers: { "content-type": "text/html; charset=utf-8", ...CORS_HEADERS },
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          ...CORS_HEADERS,
+          ...getWwwAuthenticateHeader(url.origin),
+        },
       });
     }
     resolvedUserId = effectiveAuth.userId;

@@ -25,12 +25,17 @@ transports** ready for deployment on Deno Deploy or any serverless runtime.
 - **Recursive Hierarchical View (`workflow_tree`)**:
   - Recursively expand and display complete subworkflow hierarchies up to configurable depth in
     formatted ASCII diagrams and structured JSON.
+- **Standard MCP OAuth 2.1 Authorization & Discovery (Zero Bearer Token Config)**:
+  - Full implementation of official Model Context Protocol (MCP) OAuth 2.1 authorization standard
+    (**RFC 9728 Protected Resource Metadata, RFC 8414 Authorization Server Metadata, RFC 7591
+    Dynamic Client Registration, and RFC 7636 PKCE**).
+  - Connect Claude Desktop, Cursor, Antigravity, and AI agents by specifying only the server URL —
+    zero manual copy-pasting of API tokens into configuration files.
 - **Zero 3rd-Party Biometric Authentication (Passkeys / WebAuthn)**:
   - Sign in or register in 1-click using native **Touch ID, Face ID, Windows Hello, or hardware
     security keys** in the browser.
   - Zero developer consoles, zero client secrets, zero 3rd-party dependencies.
-  - Generates persistent **Bearer API Tokens** (`wf_...`) in 1-click to connect Claude Desktop,
-    Cursor, and CLI agents to your scoped workflows.
+  - Generates persistent **Bearer API Tokens** (`wf_...`) for headless scripts and CI/CD pipelines.
 - **Serverless-First HTTP Transports**:
   - **Stateless HTTP JSON-RPC (`POST /mcp` / `POST /`)**: Designed specifically for serverless
     architectures (Deno Deploy, Cloudflare, Lambda) with no persistent socket overhead.
@@ -112,62 +117,60 @@ using either **Remote Serverless HTTP/SSE Mode** or **Local CLI / Stdio Mode**.
 
 ---
 
-### Option A: Remote Serverless Mode (HTTP / SSE)
+### Option A: Remote Serverless Mode (Standard OAuth 2.1 / Zero Config)
 
-Connect to a remote instance deployed on Deno Deploy or your self-hosted server with multi-tenant
-user isolation and Passkey authentication.
+Connect Claude Desktop, Cursor, Antigravity, or other MCP clients to your remote instance. **No
+manual Bearer tokens or headers are required in your config file!**
 
-#### 1. Generate Your API Token
+The server natively implements the **Model Context Protocol OAuth 2.1 Specification** (RFC 9728
+Protected Resource Metadata, RFC 8414 Authorization Server Metadata, RFC 7591 Dynamic Client
+Registration, and RFC 7636 PKCE).
 
-1. Open your deployed server URL in your browser (e.g. `https://your-domain.deno.dev` or
-   `http://localhost:8000`).
-2. Sign In or Register with your **Passkey (Touch ID / Face ID / Windows Hello)**.
-3. Click **"⚡ Generate New API Token"** and copy your token (`wf_...`).
+When you first connect, your MCP client will automatically trigger the standard browser
+authorization flow. Authenticate in 1 click using your **Passkey (Touch ID / Face ID / Windows
+Hello)** and grant access instantly.
 
-#### 2. Claude Desktop (`claude_desktop_config.json`)
-
-```json
-{
-  "mcpServers": {
-    "workflow-mcp": {
-      "url": "https://your-domain.deno.dev/mcp",
-      "headers": {
-        "Authorization": "Bearer wf_your_api_token"
-      }
-    }
-  }
-}
-```
-
-#### 3. Cursor (`.cursor/mcp.json`)
+#### 1. Claude Desktop (`claude_desktop_config.json`)
 
 ```json
 {
   "mcpServers": {
     "workflow-mcp": {
-      "url": "https://your-domain.deno.dev/mcp",
-      "headers": {
-        "Authorization": "Bearer wf_your_api_token"
-      }
+      "url": "https://your-domain.deno.dev/mcp"
     }
   }
 }
 ```
 
-#### 4. Antigravity / Gemini CLI (`mcp_config.json`)
+#### 2. Cursor (`.cursor/mcp.json`)
 
 ```json
 {
   "mcpServers": {
     "workflow-mcp": {
-      "url": "https://your-domain.deno.dev/mcp",
-      "headers": {
-        "Authorization": "Bearer wf_your_api_token"
-      }
+      "url": "https://your-domain.deno.dev/mcp"
     }
   }
 }
 ```
+
+#### 3. Antigravity / Gemini CLI (`mcp_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "url": "https://your-domain.deno.dev/mcp"
+    }
+  }
+}
+```
+
+> [!TIP]
+> **CLI Scripts & CI/CD Pipelines (Manual API Tokens)**: If configuring headless automation or CI/CD
+> pipelines without a browser, you can still generate static Bearer tokens (`wf_...`) via the web
+> dashboard at `https://your-domain.deno.dev` and pass
+> `"headers": { "Authorization": "Bearer wf_your_token" }`.
 
 ---
 
