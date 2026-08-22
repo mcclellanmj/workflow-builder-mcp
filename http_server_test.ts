@@ -26,6 +26,13 @@ Deno.test("HTTP Server - Health and Discovery Endpoints", async () => {
     const homeHtml = await homeRes.text();
     assert(homeHtml.includes("Workflow MCP Remote Server"));
     assert(homeHtml.includes("Stateless JSON-RPC"));
+    assert(homeHtml.includes("switchAuthTab"));
+
+    // Verify embedded script syntax
+    const scriptMatch = homeHtml.match(/<script>([\s\S]*?)<\/script>/i);
+    assert(scriptMatch, "Landing page must contain an inline script");
+    // Ensure script parses without syntax error (e.g. invalid regex literals)
+    new Function(scriptMatch[1]);
 
     // 3. CORS Preflight
     const corsReq = new Request("http://localhost:8000/mcp", { method: "OPTIONS" });

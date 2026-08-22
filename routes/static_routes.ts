@@ -204,7 +204,7 @@ export function renderDashboardHtml(origin: string): string {
         const bytes = new Uint8Array(buffer);
         let binary = "";
         for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-        return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
       }
 
       function base64UrlToBuffer(base64url) {
