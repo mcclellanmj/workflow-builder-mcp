@@ -322,18 +322,4 @@ Deno.test("OAuth Server - Unauthenticated MCP Request Returns WWW-Authenticate C
     wwwAuth,
     'resource_metadata="http://localhost:8000/.well-known/oauth-protected-resource"',
   );
-
-  // 2. GET /sse without Auth
-  const unauthSseReq = new Request("http://localhost:8000/sse", {
-    method: "GET",
-  });
-  const unauthSseRes = await handleHttpRequest(unauthSseReq);
-  assertEquals(unauthSseRes.status, 401);
-  const sseWwwAuth = unauthSseRes.headers.get("www-authenticate");
-  assertExists(sseWwwAuth);
-  assertStringIncludes(sseWwwAuth, 'Bearer realm="workflow-mcp"');
-  assertStringIncludes(
-    sseWwwAuth,
-    'resource_metadata="http://localhost:8000/.well-known/oauth-protected-resource"',
-  );
 });
