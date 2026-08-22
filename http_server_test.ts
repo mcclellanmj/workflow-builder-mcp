@@ -42,10 +42,16 @@ Deno.test("HTTP Server - Bearer Token Lifecycle & Auth Guard", async () => {
   setKv(kv);
 
   try {
-    // 1. Unauthenticated /api/me should be 401
+    // 1. Unauthenticated /api/me and /api/tokens should be 401 with WWW-Authenticate
     const unauthReq = new Request("http://localhost:8000/api/me", { method: "GET" });
     const unauthRes = await handleHttpRequest(unauthReq);
     assertEquals(unauthRes.status, 401);
+    assert(unauthRes.headers.get("www-authenticate")?.includes("oauth-protected-resource"));
+
+    const unauthTokensReq = new Request("http://localhost:8000/api/tokens", { method: "GET" });
+    const unauthTokensRes = await handleHttpRequest(unauthTokensReq);
+    assertEquals(unauthTokensRes.status, 401);
+    assert(unauthTokensRes.headers.get("www-authenticate")?.includes("oauth-protected-resource"));
 
     // 2. Generate a token directly
     const tokenInfo = await createApiToken("user_charlie", "Charlie Work Laptop", 30);
@@ -303,10 +309,11 @@ Deno.test("HTTP Server - Authenticated Passkey Management Lifecycle", async () =
     const userId = "user_passkey_mgr";
     const tokenInfo = await createApiToken(userId, "Manager Token");
 
-    // 1. Unauthenticated /api/passkeys should return 404 or 401 (not handled by unauthenticated router)
+    // 1. Unauthenticated /api/passkeys should return 401 Unauthorized with WWW-Authenticate
     const unauthReq = new Request("http://localhost:8000/api/passkeys", { method: "GET" });
     const unauthRes = await handleHttpRequest(unauthReq);
-    assertEquals(unauthRes.status, 404);
+    assertEquals(unauthRes.status, 401);
+    assert(unauthRes.headers.get("www-authenticate")?.includes("oauth-protected-resource"));
 
     // 2. Add sample passkeys in KV
     await kv.set(["users", userId, "passkeys", "key_laptop"], {

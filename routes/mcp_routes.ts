@@ -11,26 +11,32 @@ import { createMcpServer } from "../server.ts";
 import { CORS_HEADERS, errorResponse, jsonResponse } from "./common.ts";
 
 let _cachedTools: Array<Record<string, unknown>> | null = null;
+let _cachedToolsPromise: Promise<Array<Record<string, unknown>>> | null = null;
 
-export async function getCachedToolDefinitions(): Promise<Array<Record<string, unknown>>> {
-  if (_cachedTools) return _cachedTools;
+export function getCachedToolDefinitions(): Promise<Array<Record<string, unknown>>> {
+  if (_cachedTools) return Promise.resolve(_cachedTools);
+  if (!_cachedToolsPromise) {
+    _cachedToolsPromise = (async () => {
+      const server = createMcpServer();
+      const client = new Client({ name: "introspect", version: "1.0.0" }, { capabilities: {} });
+      const [cT, sT] = InMemoryTransport.createLinkedPair();
 
-  const server = createMcpServer();
-  const client = new Client({ name: "introspect", version: "1.0.0" }, { capabilities: {} });
-  const [cT, sT] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(sT), client.connect(cT)]);
+      const toolList = await client.listTools();
+      _cachedTools = toolList.tools as Array<Record<string, unknown>>;
 
-  await Promise.all([server.connect(sT), client.connect(cT)]);
-  const toolList = await client.listTools();
-  _cachedTools = toolList.tools as Array<Record<string, unknown>>;
+      await client.close();
+      await server.close();
 
-  await client.close();
-  await server.close();
-
-  return _cachedTools;
+      return _cachedTools;
+    })();
+  }
+  return _cachedToolsPromise;
 }
 
 export function clearToolDefinitionCache(): void {
   _cachedTools = null;
+  _cachedToolsPromise = null;
 }
 
 interface SseSession {
@@ -43,6 +49,17 @@ interface SseSession {
 }
 
 const sseSessions = new Map<string, SseSession>();
+const SSE_SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour TTL
+
+function sweepStaleSseSessions(): void {
+  const now = Date.now();
+  for (const [id, session] of sseSessions.entries()) {
+    if (now - session.createdAt > SSE_SESSION_TTL_MS) {
+      sseSessions.delete(id);
+      session.writer.close().catch(() => {});
+    }
+  }
+}
 
 async function sendSseEvent(
   writer: WritableStreamDefaultWriter<Uint8Array>,
@@ -72,6 +89,16 @@ export async function processJsonRpcMessage(
 ): Promise<
   { jsonrpc: "2.0"; id?: string | number | null; result?: unknown; error?: unknown } | null
 > {
+  if (!msg || typeof msg !== "object" || typeof msg.method !== "string") {
+    return {
+      jsonrpc: "2.0",
+      id: (msg && typeof msg === "object" && "id" in msg)
+        ? (msg.id as string | number | null)
+        : null,
+      error: { code: -32600, message: "Invalid Request: 'method' string is required." },
+    };
+  }
+
   const isNotification = msg.id === undefined || msg.id === null;
 
   if (msg.method.startsWith("notifications/")) {
@@ -177,15 +204,22 @@ export async function handleMcpRoutes(
   // Stateless HTTP JSON-RPC MCP Endpoint
   if ((path === "/mcp" || path === "/api/mcp" || path === "/") && method === "POST") {
     if (!auth) {
-      return jsonResponse({
-        jsonrpc: "2.0",
-        id: null,
-        error: {
-          code: -32000,
-          message:
-            "Unauthorized: Missing or invalid authentication. Provide Authorization: Bearer <token> or X-User-Id header.",
+      return jsonResponse(
+        {
+          jsonrpc: "2.0",
+          id: null,
+          error: {
+            code: -32000,
+            message:
+              "Unauthorized: Missing or invalid authentication. Provide Authorization: Bearer <token> or connect via standard OAuth 2.1 flow.",
+          },
         },
-      }, 401);
+        401,
+        {
+          "WWW-Authenticate":
+            `Bearer realm="workflow-mcp", resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+        },
+      );
     }
 
     try {
@@ -231,9 +265,13 @@ export async function handleMcpRoutes(
   // Streamable SSE MCP Endpoint
   if (path === "/sse" && method === "GET") {
     if (!auth) {
-      return errorResponse("Unauthorized: Missing or invalid authentication.", 401);
+      return errorResponse("Unauthorized: Missing or invalid authentication.", 401, {
+        "WWW-Authenticate":
+          `Bearer realm="workflow-mcp", resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+      });
     }
 
+    sweepStaleSseSessions();
     const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
       url.searchParams.get("token") || undefined;
     const sessionId = crypto.randomUUID();

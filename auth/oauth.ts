@@ -156,9 +156,9 @@ export async function handleCallback(req: Request): Promise<Response> {
     createdAt: new Date().toISOString(),
   };
 
-  // Associate sessionId with userId and save user record
+  // Associate sessionId with userId and save user record (30 days TTL)
   await kv.atomic()
-    .set(["sessions", sessionId], userSession)
+    .set(["sessions", sessionId], userSession, { expireIn: 30 * 24 * 60 * 60 * 1000 })
     .set(["users", userId, "profile"], userSession)
     .commit();
 
@@ -185,11 +185,14 @@ export async function createSession(
   };
 
   await kv.atomic()
-    .set(["sessions", sessionId], session)
+    .set(["sessions", sessionId], session, { expireIn: 30 * 24 * 60 * 60 * 1000 })
     .set(["users", userId, "profile"], session)
     .commit();
 
-  const isSecure = safeGetEnv("DENO_ENV") === "production";
+  const isSecure = safeGetEnv("DENO_ENV") === "production" ||
+    safeGetEnv("NODE_ENV") === "production" ||
+    Boolean(safeGetEnv("DENO_DEPLOYMENT_ID")) ||
+    Boolean(safeGetEnv("DENO_REGION"));
   const cookieHeader = `site-session=${sessionId}; Path=/; HttpOnly; SameSite=Lax${
     isSecure ? "; Secure" : ""
   }; Max-Age=2592000`;
@@ -321,7 +324,16 @@ export async function authenticateRequest(req: Request): Promise<AuthResult | nu
 
   // 2. Check KV OAuth Session Cookie
   try {
-    const sessionId = await getSessionId(req);
+    let sessionId = await getSessionId(req);
+    if (!sessionId) {
+      const cookieStr = req.headers.get("cookie") || req.headers.get("Cookie");
+      if (cookieStr) {
+        const match = cookieStr.match(/(?:^|;\s*)site-session=([^;]+)/);
+        if (match) {
+          sessionId = decodeURIComponent(match[1]);
+        }
+      }
+    }
     if (sessionId) {
       const sessionEntry = await kv.get<UserSession>(["sessions", sessionId]);
       if (sessionEntry.value) {
@@ -336,9 +348,8 @@ export async function authenticateRequest(req: Request): Promise<AuthResult | nu
     // Ignore cookie parsing errors
   }
 
-  // 3. Check X-User-Id header for development / testing environments
-  const allowHeaderAuth = safeGetEnv("ALLOW_HEADER_AUTH") === "1" ||
-    safeGetEnv("DENO_ENV") !== "production";
+  // 3. Check X-User-Id header for development / testing environments (Strict Opt-In only)
+  const allowHeaderAuth = safeGetEnv("ALLOW_HEADER_AUTH") === "1";
   const headerUserId = req.headers.get("x-user-id") || req.headers.get("X-User-Id");
   if (allowHeaderAuth && headerUserId && headerUserId.trim().length > 0) {
     return {

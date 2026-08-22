@@ -10,15 +10,26 @@ import {
   listUserPasskeys,
   verifyPasskeyRegistration,
 } from "../auth/passkey.ts";
-import { errorResponse, jsonResponse } from "./common.ts";
+import { errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
 
 export async function handlePasskeyManagementRoutes(
   req: Request,
   url: URL,
-  auth: AuthResult,
+  auth: AuthResult | null,
 ): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method.toUpperCase();
+
+  const isPasskeyRoute = path.startsWith("/api/passkeys");
+  if (!isPasskeyRoute) return null;
+
+  if (!auth) {
+    return errorResponse(
+      "Unauthorized. Please log in or provide Bearer token.",
+      401,
+      getWwwAuthenticateHeader(url.origin),
+    );
+  }
 
   // 1. Generate options to add another passkey for the authenticated user
   if (path === "/api/passkeys/add-options" && method === "POST") {

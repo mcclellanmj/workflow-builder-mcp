@@ -254,6 +254,11 @@ export async function verifyPasskeyRegistration(
       createdAt: new Date().toISOString(),
     };
 
+    const existingUsernameEntry = await kv.get<string>(["users_by_username", username]);
+    if (existingUsernameEntry.value && existingUsernameEntry.value !== userId) {
+      return { verified: false, error: `Username "${username}" has already been claimed.` };
+    }
+
     const existingProfile = (await kv.get<UserPasskeyProfile>(["users", userId, "profile"])).value;
     const count = await existingPasskeyCount(kv, userId);
     const userProfile: UserPasskeyProfile = {
@@ -264,12 +269,17 @@ export async function verifyPasskeyRegistration(
       passkeyCount: count + 1,
     };
 
-    await kv.atomic()
+    const commitRes = await kv.atomic()
+      .check(existingUsernameEntry)
       .set(["users", userId, "passkeys", credentialID], storedPasskey)
       .set(["passkeys_by_id", credentialID], { userId, username, passkey: storedPasskey })
       .set(["users_by_username", username], userId)
       .set(["users", userId, "profile"], userProfile)
       .commit();
+
+    if (!commitRes.ok) {
+      return { verified: false, error: "Registration conflict. Please try again." };
+    }
 
     return {
       verified: true,
