@@ -4,7 +4,6 @@
  * Exposes:
  * - Passkey / WebAuthn Biometric Auth (/auth/passkey/*)
  * - Stateless HTTP JSON-RPC MCP at POST /mcp and POST /
- * - Streamable SSE MCP at GET /sse and POST /message
  * - API Token management (/api/token, /api/tokens, /api/tokens/:id)
  * - User and Health Discovery (/api/me, /health, /)
  *
@@ -77,7 +76,7 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
   const tokenRes = await handleTokenRoutes(req, url, auth);
   if (tokenRes) return tokenRes;
 
-  // 7. MCP Routes (Stateless JSON-RPC and Streamable SSE)
+  // 7. MCP Routes (Stateless JSON-RPC)
   const mcpRes = await handleMcpRoutes(req, url, auth);
   if (mcpRes) return mcpRes;
 

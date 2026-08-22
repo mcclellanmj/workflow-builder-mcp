@@ -135,7 +135,7 @@ export function renderDashboardHtml(origin: string): string {
       <h2 style="margin-top: 24px;">⚙️ Client Setup Configurations</h2>
       <p>Configure Claude Desktop, Cursor, Antigravity, or other MCP clients:</p>
       
-      <h3 style="font-size: 0.95rem; margin-top: 14px; color: #38bdf8;">Option A: Remote Server Mode (HTTP / SSE)</h3>
+      <h3 style="font-size: 0.95rem; margin-top: 14px; color: #38bdf8;">Option A: Remote Server Mode (Stateless HTTP)</h3>
       <p style="font-size: 0.85rem; color: #94a3b8;">Connects to this server instance using your Bearer API token:</p>
       <pre><code id="configSnippet">{
   "mcpServers": {
@@ -172,7 +172,6 @@ export function renderDashboardHtml(origin: string): string {
       <ul>
         <li><strong>Live SSR Visualizer</strong>: <code>GET ${origin}/visualize/:workflowId</code> (supports share tickets <code>?ticket=...</code>, 1 week default up to 1 year)</li>
         <li><strong>Stateless JSON-RPC MCP</strong>: <code>POST ${origin}/mcp</code></li>
-        <li><strong>SSE Stream</strong>: <code>GET ${origin}/sse</code> + <code>POST ${origin}/message</code></li>
         <li><strong>Health Probe</strong>: <code>GET ${origin}/health</code></li>
         <li><strong>User Profile</strong>: <code>GET ${origin}/api/me</code></li>
       </ul>
@@ -547,7 +546,6 @@ export async function handleStaticRoutes(
         oauthConfigured: Boolean(getOAuthConfig()),
         endpoints: {
           mcp: `${url.origin}/mcp`,
-          sse: `${url.origin}/sse`,
           health: `${url.origin}/health`,
           authPasskey: `${url.origin}/auth/passkey/*`,
         },

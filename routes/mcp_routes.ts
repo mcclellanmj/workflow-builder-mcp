@@ -1,5 +1,5 @@
 /**
- * Stateless JSON-RPC and Streamable SSE MCP protocol route handlers.
+ * Stateless JSON-RPC MCP protocol route handlers.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -8,7 +8,7 @@ import { type RequestContext, withRequestContext } from "../auth/context.ts";
 import type { AuthResult } from "../auth/oauth.ts";
 import { defaultRegistry } from "../mcp/registry.ts";
 import { createMcpServer } from "../server.ts";
-import { CORS_HEADERS, errorResponse, jsonResponse } from "./common.ts";
+import { CORS_HEADERS, jsonResponse } from "./common.ts";
 
 let _cachedTools: Array<Record<string, unknown>> | null = null;
 let _cachedToolsPromise: Promise<Array<Record<string, unknown>>> | null = null;
@@ -37,42 +37,6 @@ export function getCachedToolDefinitions(): Promise<Array<Record<string, unknown
 export function clearToolDefinitionCache(): void {
   _cachedTools = null;
   _cachedToolsPromise = null;
-}
-
-interface SseSession {
-  sessionId: string;
-  userId: string;
-  writer: WritableStreamDefaultWriter<Uint8Array>;
-  createdAt: number;
-  serverOrigin?: string;
-  token?: string;
-}
-
-const sseSessions = new Map<string, SseSession>();
-const SSE_SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour TTL
-
-function sweepStaleSseSessions(): void {
-  const now = Date.now();
-  for (const [id, session] of sseSessions.entries()) {
-    if (now - session.createdAt > SSE_SESSION_TTL_MS) {
-      sseSessions.delete(id);
-      session.writer.close().catch(() => {});
-    }
-  }
-}
-
-async function sendSseEvent(
-  writer: WritableStreamDefaultWriter<Uint8Array>,
-  event: string,
-  data: string,
-): Promise<void> {
-  const encoder = new TextEncoder();
-  const payload = `event: ${event}\ndata: ${data}\n\n`;
-  try {
-    await writer.write(encoder.encode(payload));
-  } catch (err) {
-    console.error("[WORKFLOW_MCP] Error writing SSE event:", err);
-  }
 }
 
 export interface JsonRpcRequest {
@@ -259,81 +223,6 @@ export async function handleMcpRoutes(
           message: `Parse error: ${err instanceof Error ? err.message : String(err)}`,
         },
       }, 400);
-    }
-  }
-
-  // Streamable SSE MCP Endpoint
-  if (path === "/sse" && method === "GET") {
-    if (!auth) {
-      return errorResponse("Unauthorized: Missing or invalid authentication.", 401, {
-        "WWW-Authenticate":
-          `Bearer realm="workflow-mcp", resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
-      });
-    }
-
-    sweepStaleSseSessions();
-    const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
-      url.searchParams.get("token") || undefined;
-    const sessionId = crypto.randomUUID();
-    const stream = new TransformStream<Uint8Array, Uint8Array>();
-    const writer = stream.writable.getWriter();
-
-    const session: SseSession = {
-      sessionId,
-      userId: auth.userId,
-      writer,
-      createdAt: Date.now(),
-      serverOrigin: url.origin,
-      token,
-    };
-    sseSessions.set(sessionId, session);
-
-    const endpointUrl = `/message?sessionId=${sessionId}`;
-    sendSseEvent(writer, "endpoint", endpointUrl).catch((err) => {
-      console.error("[WORKFLOW_MCP] Initial SSE event failed:", err);
-    });
-
-    req.signal.addEventListener("abort", () => {
-      sseSessions.delete(sessionId);
-      writer.close().catch((err) => {
-        console.error("[WORKFLOW_MCP] Closing aborted SSE writer failed:", err);
-      });
-    });
-
-    return new Response(stream.readable, {
-      status: 200,
-      headers: {
-        "content-type": "text/event-stream; charset=utf-8",
-        "cache-control": "no-cache, no-transform",
-        "connection": "keep-alive",
-        ...CORS_HEADERS,
-      },
-    });
-  }
-
-  if (path === "/message" && method === "POST") {
-    const sessionId = url.searchParams.get("sessionId");
-    if (!sessionId || !sseSessions.has(sessionId)) {
-      return errorResponse("Invalid or expired sessionId.", 400);
-    }
-
-    const session = sseSessions.get(sessionId)!;
-    try {
-      const rawBody = await req.json();
-      const response = await processJsonRpcMessage(rawBody as JsonRpcRequest, session.userId, {
-        serverOrigin: session.serverOrigin,
-        token: session.token,
-      });
-
-      if (response) {
-        await sendSseEvent(session.writer, "message", JSON.stringify(response));
-      }
-      return new Response(null, { status: 202, headers: CORS_HEADERS });
-    } catch (err) {
-      return errorResponse(
-        `Error processing message: ${err instanceof Error ? err.message : String(err)}`,
-        400,
-      );
     }
   }
 

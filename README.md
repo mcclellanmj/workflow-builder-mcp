@@ -5,8 +5,8 @@ structured workflows, Directed Acyclic Graphs (DAGs), gated review-fix loops, su
 human-in-the-loop interactions.
 
 Equipped with **multi-tenant user-scoped persistence**, **Passkey (Touch ID / Face ID / Windows
-Hello) biometric authentication (0 third-party setup required)**, and **serverless HTTP / SSE
-transports** ready for deployment on Deno Deploy or any serverless runtime.
+Hello) biometric authentication (0 third-party setup required)**, and **stateless serverless HTTP
+transport** ready for deployment on Deno Deploy or any serverless runtime.
 
 ---
 
@@ -36,10 +36,9 @@ transports** ready for deployment on Deno Deploy or any serverless runtime.
     security keys** in the browser.
   - Zero developer consoles, zero client secrets, zero 3rd-party dependencies.
   - Generates persistent **Bearer API Tokens** (`wf_...`) for headless scripts and CI/CD pipelines.
-- **Serverless-First HTTP Transports**:
+- **Serverless-First Stateless HTTP Transport**:
   - **Stateless HTTP JSON-RPC (`POST /mcp` / `POST /`)**: Designed specifically for serverless
-    architectures (Deno Deploy, Cloudflare, Lambda) with no persistent socket overhead.
-  - **Streamable SSE (`GET /sse` + `POST /message`)**: Standard MCP Server-Sent Events transport.
+    architectures (Deno Deploy, Cloudflare, Lambda) with no persistent socket or connection state overhead.
 - **Multi-Tenant User Isolation**: All workflows, nodes, edges, and executions are scoped by
   `userId` in Deno KV (`["users", userId, ...]`).
 - **Workflow & Graph Management**: Create, list, inspect, patch, search, tree, and delete workflow
@@ -113,7 +112,7 @@ deployctl deploy --project=workflow-mcp --entrypoint=http_server.ts
 ## Client Configuration
 
 You can connect your AI assistant (Claude Desktop, Cursor, Antigravity, Windsurf, Roo Code, etc.)
-using either **Remote Serverless HTTP/SSE Mode** or **Local CLI / Stdio Mode**.
+using either **Remote Serverless HTTP Mode** or **Local CLI / Stdio Mode**.
 
 ---
 
