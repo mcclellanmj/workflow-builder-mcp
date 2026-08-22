@@ -63,6 +63,8 @@ export interface IterationRecord {
 /** A workflow graph container. */
 export interface Workflow {
   id: WorkflowId;
+  /** The owner user ID if running in a multi-tenant / scoped environment. */
+  userId?: string;
   name: string;
   description: string;
   /**
@@ -78,6 +80,8 @@ export interface Workflow {
 export interface WorkflowNode {
   id: NodeId;
   workflowId: WorkflowId;
+  /** The owner user ID if running in a multi-tenant / scoped environment. */
+  userId?: string;
   type: NodeType;
   name: string;
   /** The instruction / prompt for the agent. Can contain code snippets for external execution. */
@@ -92,7 +96,7 @@ export interface WorkflowNode {
   error: string | null;
   /** Current iteration count (starts at 1 when first executed, increments on loop re-entry). */
   iteration?: number;
-  /** History of outputs/errors from previous iterations when looping. */
+  /** History of errors and execution records from previous iterations when looping. */
   iterationHistory?: IterationRecord[];
   createdAt: string;
   updatedAt: string;
@@ -102,6 +106,8 @@ export interface WorkflowNode {
 export interface WorkflowEdge {
   id: EdgeId;
   workflowId: WorkflowId;
+  /** The owner user ID if running in a multi-tenant / scoped environment. */
+  userId?: string;
   fromNodeId: NodeId;
   toNodeId: NodeId;
   /** For decision nodes: the condition label (e.g. "yes", "no") that selects this edge. */
@@ -144,7 +150,7 @@ export interface NodeExecutionState {
   error: string | null;
   /** Current iteration count (starts at 1 when first executed, increments on loop re-entry). */
   iteration?: number;
-  /** History of outputs/errors from previous iterations when looping. */
+  /** History of errors and execution records from previous iterations when looping. */
   iterationHistory?: IterationRecord[];
   /** When this node state was last updated. */
   updatedAt: string;
@@ -159,6 +165,8 @@ export interface WorkflowExecution {
   id: ExecutionId;
   /** The workflow template this execution runs. */
   workflowId: WorkflowId;
+  /** The owner user ID if running in a multi-tenant / scoped environment. */
+  userId?: string;
   /** Overall status of this execution. */
   status: ExecutionStatus;
   /** Per-node runtime state, keyed by node ID. */
@@ -209,4 +217,19 @@ export interface WorkflowImportResult {
     executions?: Record<ExecutionId, ExecutionId>;
   };
   validation?: ValidationResult;
+}
+
+// ---------------------------------------------------------------------------
+// Visualization Share Tickets (30-minute shareable links)
+// ---------------------------------------------------------------------------
+
+/** Secure, time-limited ticket for public/shared workflow visualization. */
+export interface ViewTicket {
+  ticketId: string;
+  userId: string;
+  workflowId: WorkflowId;
+  executionId?: ExecutionId;
+  createdAt: string;
+  /** Expiration timestamp in milliseconds (e.g. Date.now() + 30 * 60 * 1000). */
+  expiresAt: number;
 }

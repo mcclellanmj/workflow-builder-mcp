@@ -16,21 +16,29 @@ import {
 } from "../helpers.ts";
 
 const StartWorkflowArgsSchema = z.object({
-  workflowId: z.string().min(1).describe("The unique identifier of the workflow to start."),
+  workflow: z.string().min(1).optional().describe(
+    "The unique identifier, name, or slug of the workflow to start.",
+  ),
+  workflowId: z.string().min(1).optional().describe(
+    "Alias for 'workflow'. The unique identifier, name, or slug of the workflow to start.",
+  ),
   format: z.enum(["markdown", "json", "both"]).optional().default("both").describe(
     "Optional output format. 'markdown' returns human-readable dashboard, 'json' returns raw data, 'both' (default) returns multi-block annotated content for user and assistant.",
   ),
+}).refine((data) => data.workflow || data.workflowId, {
+  message: "Workflow ('workflow' or 'workflowId') must be provided.",
 });
 
 export const startWorkflowTool = defineTool({
   name: "workflow_start",
   description:
-    "Begins a new workflow execution. Validates the workflow graph structure, creates a unique execution ID scoped to this run, marks the start node as completed, and returns the initial actionable node(s) along with the execution ID (required for subsequent workflow_next calls), workflow status summary, and visual diagram. Multiple projects can start independent executions of the same workflow simultaneously.",
+    "Begins a new workflow execution. Validates the workflow graph structure, creates a unique execution ID scoped to this run, marks the start node as completed, and returns the initial actionable node(s) along with the execution ID (required for subsequent workflow_next calls), workflow status summary, and visual diagram. Supports workflow UUIDs, exact names, or slugs. Multiple projects can start independent executions of the same workflow simultaneously.",
   schema: StartWorkflowArgsSchema,
-  execute: async ({ workflowId, format }) => {
-    const graphCheck = await requireWorkflowGraph(workflowId);
+  execute: async ({ workflow, workflowId, format }) => {
+    const targetWorkflow = workflow ?? workflowId!;
+    const graphCheck = await requireWorkflowGraph(targetWorkflow);
     if ("error" in graphCheck) return graphCheck.error;
-    const { workflow, nodes, edges } = graphCheck;
+    const { workflow: wf, nodes, edges } = graphCheck;
 
     const validation = validateGraph(nodes, edges);
     if (!validation.valid) {
@@ -50,7 +58,7 @@ export const startWorkflowTool = defineTool({
     // Initialize execution with start node marked as completed
     const execution: WorkflowExecution = {
       id: executionId,
-      workflowId,
+      workflowId: wf.id,
       status: "in_progress",
       nodeStates: {
         [startNode.id]: {
@@ -94,8 +102,8 @@ export const startWorkflowTool = defineTool({
 
     const responseData = {
       executionId,
-      workflowId: workflow.id,
-      workflowName: workflow.name,
+      workflowId: wf.id,
+      workflowName: wf.name,
       status: workflowComplete ? "completed" : "in_progress",
       startNode: {
         id: startNode.id,
@@ -110,7 +118,7 @@ export const startWorkflowTool = defineTool({
     };
 
     const markdown = formatWorkflowStartMarkdown(
-      workflow,
+      wf,
       startNode,
       actionableNextNodes,
       summary,

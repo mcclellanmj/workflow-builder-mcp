@@ -5,7 +5,12 @@ import { analyzeWorkflowSuggestions } from "../../validation/heuristics.ts";
 import { defineTool, jsonResponse, requireWorkflow, validateNodeConfig } from "../helpers.ts";
 
 const AddNodeSchema = z.object({
-  workflowId: z.string().min(1).describe("The unique ID of the workflow to add the node to."),
+  workflow: z.string().min(1).optional().describe(
+    "The unique identifier, name, or slug of the workflow to add the node to.",
+  ),
+  workflowId: z.string().min(1).optional().describe(
+    "Alias for 'workflow'. The unique ID, name, or slug of the workflow to add the node to.",
+  ),
   type: z.enum(["step", "decision", "end", "subworkflow", "user_interaction"], {
     errorMap: () => ({
       message:
@@ -24,26 +29,38 @@ const AddNodeSchema = z.object({
   config: z.record(z.unknown()).optional().describe(
     "Optional configuration object for the node. For decision nodes, must include 'options' as an array of string choices. For subworkflow nodes, must include 'childWorkflowId'. For user_interaction nodes, must include 'prompt' and optional 'options' / 'allowFreeText' / 'contextHint'.",
   ),
+}).refine((data) => data.workflow || data.workflowId, {
+  message: "Workflow ('workflow' or 'workflowId') must be provided.",
 });
 
 export const addNodeTool = defineTool({
   name: "node_add",
   description:
-    "Adds a new node (step, decision, end, subworkflow, or user_interaction) to an existing workflow. Note: 'start' nodes cannot be added manually as they are auto-created with workflows. Decision nodes require config.options containing the list of possible branch outcomes. Subworkflow nodes require config.childWorkflowId. User interaction nodes require config.prompt.",
+    "Adds a new node (step, decision, end, subworkflow, or user_interaction) to an existing workflow. Supports workflow UUIDs, exact names, or slugs. Note: 'start' nodes cannot be added manually as they are auto-created with workflows. Decision nodes require config.options containing the list of possible branch outcomes. Subworkflow nodes require config.childWorkflowId. User interaction nodes require config.prompt.",
   schema: AddNodeSchema,
-  execute: async ({ workflowId, type, name, description, runInSubAgent, config }) => {
-    const wfCheck = await requireWorkflow(workflowId);
+  execute: async ({
+    workflow,
+    workflowId,
+    type,
+    name,
+    description,
+    runInSubAgent,
+    config,
+  }) => {
+    const targetWorkflow = workflow ?? workflowId!;
+    const wfCheck = await requireWorkflow(targetWorkflow);
     if ("error" in wfCheck) return wfCheck.error;
 
+    const actualWfId = wfCheck.workflow.id;
     const nodeConfig = config ?? {};
 
-    const validationError = validateNodeConfig(type as NodeType, nodeConfig, workflowId);
+    const validationError = validateNodeConfig(type as NodeType, nodeConfig, actualWfId);
     if (validationError) return validationError;
 
     const now = new Date().toISOString();
     const newNode: WorkflowNode = {
       id: crypto.randomUUID(),
-      workflowId,
+      workflowId: actualWfId,
       type: type as NodeType,
       name,
       description,
@@ -58,8 +75,8 @@ export const addNodeTool = defineTool({
     await saveNode(newNode);
 
     const [allNodes, allEdges] = await Promise.all([
-      listNodes(workflowId),
-      listEdges(workflowId),
+      listNodes(actualWfId),
+      listEdges(actualWfId),
     ]);
     const suggestions = analyzeWorkflowSuggestions(allNodes, allEdges);
 

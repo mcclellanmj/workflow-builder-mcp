@@ -3,13 +3,37 @@ import { deleteEdge, listEdges, listNodes } from "../../store/kv.ts";
 import type { ValidationResult, WorkflowEdge } from "../../store/types.ts";
 import { createErrorResponse } from "../registry.ts";
 import { validateGraph } from "../../validation/graph.ts";
-import { defineTool, jsonResponse, requireWorkflow } from "../helpers.ts";
+import { defineTool, jsonResponse, requireWorkflowGraph, resolveNode } from "../helpers.ts";
 
 const DisconnectNodesSchema = z.object({
-  workflowId: z.string().min(1).describe("The unique identifier of the workflow."),
-  fromNodeId: z.string().min(1).describe("The ID of the source node."),
-  toNodeId: z.string().min(1).describe("The ID of the target node."),
-});
+  workflow: z.string().min(1).optional().describe(
+    "The unique identifier, name, or slug of the workflow.",
+  ),
+  workflowId: z.string().min(1).optional().describe(
+    "Alias for 'workflow'. The unique identifier, name, or slug of the workflow.",
+  ),
+  fromNode: z.string().min(1).optional().describe(
+    "The ID, name, or slug of the source node.",
+  ),
+  fromNodeId: z.string().min(1).optional().describe(
+    "Alias for 'fromNode'. The ID, name, or slug of the source node.",
+  ),
+  toNode: z.string().min(1).optional().describe(
+    "The ID, name, or slug of the target node.",
+  ),
+  toNodeId: z.string().min(1).optional().describe(
+    "Alias for 'toNode'. The ID, name, or slug of the target node.",
+  ),
+}).refine(
+  (data) =>
+    (data.workflow || data.workflowId) &&
+    (data.fromNode || data.fromNodeId) &&
+    (data.toNode || data.toNodeId),
+  {
+    message:
+      "Workflow ('workflow' or 'workflowId'), source node ('fromNode' or 'fromNodeId'), and target node ('toNode' or 'toNodeId') must be provided.",
+  },
+);
 
 /**
  * Extracts post-disconnection warnings from graph validation results.
@@ -32,28 +56,38 @@ function extractDisconnectionWarnings(validation: ValidationResult): string[] {
 export const disconnectNodesTool = defineTool({
   name: "node_disconnect",
   description:
-    "Removes a directed edge between two nodes in a workflow graph. Validates that the edge exists before deleting it, and checks the graph structure after deletion to warn if any nodes have become unreachable from the start node.",
+    "Removes a directed edge between two nodes in a workflow graph. Supports workflow and node UUIDs, exact names, or slugs. Validates that the edge exists before deleting it, and checks the graph structure after deletion to warn if any nodes have become unreachable from the start node.",
   schema: DisconnectNodesSchema,
-  execute: async ({ workflowId, fromNodeId, toNodeId }) => {
-    const wfCheck = await requireWorkflow(workflowId);
-    if ("error" in wfCheck) return wfCheck.error;
+  execute: async ({ workflow, workflowId, fromNode, fromNodeId, toNode, toNodeId }) => {
+    const targetWorkflow = workflow ?? workflowId!;
+    const fromTarget = fromNode ?? fromNodeId!;
+    const toTarget = toNode ?? toNodeId!;
 
-    const edges = await listEdges(workflowId);
+    const graphCheck = await requireWorkflowGraph(targetWorkflow);
+    if ("error" in graphCheck) return graphCheck.error;
+
+    const { workflow: wf, nodes, edges } = graphCheck;
+    const resolvedFrom = resolveNode(fromTarget, nodes);
+    const resolvedTo = resolveNode(toTarget, nodes);
+
+    const fromId = resolvedFrom ? resolvedFrom.id : fromTarget;
+    const toId = resolvedTo ? resolvedTo.id : toTarget;
+
     const edgeToDelete = edges.find(
-      (edge) => edge.fromNodeId === fromNodeId && edge.toNodeId === toNodeId,
+      (edge) => edge.fromNodeId === fromId && edge.toNodeId === toId,
     );
 
     if (!edgeToDelete) {
       return createErrorResponse(
-        `No edge found from node "${fromNodeId}" to node "${toNodeId}" in workflow "${workflowId}".`,
+        `No edge found from node "${fromTarget}" to node "${toTarget}" in workflow "${wf.name}" (${wf.id}).`,
       );
     }
 
-    await deleteEdge(workflowId, edgeToDelete.id);
+    await deleteEdge(wf.id, edgeToDelete.id);
 
     const [remainingNodes, remainingEdges] = await Promise.all([
-      listNodes(workflowId),
-      listEdges(workflowId),
+      listNodes(wf.id),
+      listEdges(wf.id),
     ]);
     const validation = validateGraph(remainingNodes, remainingEdges);
     const warnings = extractDisconnectionWarnings(validation);
@@ -63,7 +97,9 @@ export const disconnectNodesTool = defineTool({
       deletedEdge: WorkflowEdge;
       warnings?: string[];
     } = {
-      message: `Successfully removed edge connecting node "${fromNodeId}" to node "${toNodeId}".`,
+      message: `Successfully removed edge connecting node "${
+        resolvedFrom?.name ?? fromTarget
+      }" to node "${resolvedTo?.name ?? toTarget}".`,
       deletedEdge: edgeToDelete,
     };
 

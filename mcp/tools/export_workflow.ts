@@ -1,10 +1,13 @@
 import { z } from "zod";
 import { exportWorkflowBundle } from "../../store/kv.ts";
-import { createErrorResponse, defineTool, richResponse } from "../helpers.ts";
+import { createErrorResponse, defineTool, requireWorkflow, richResponse } from "../helpers.ts";
 
 const ExportWorkflowSchema = z.object({
-  workflowId: z.string().min(1).describe(
-    "The unique identifier of the workflow to export.",
+  workflow: z.string().min(1).optional().describe(
+    "The unique identifier, name, or slug of the workflow to export.",
+  ),
+  workflowId: z.string().min(1).optional().describe(
+    "Alias for 'workflow'. The unique identifier, name, or slug of the workflow to export.",
   ),
   includeSubworkflows: z.boolean().optional().default(true).describe(
     "Optional. If true (default), recursively finds and bundles any child subworkflows referenced by subworkflow nodes.",
@@ -18,21 +21,35 @@ const ExportWorkflowSchema = z.object({
   format: z.enum(["markdown", "json", "both"]).optional().default("both").describe(
     "Optional output format. 'markdown' returns a summary, 'json' returns the export bundle JSON, 'both' (default) returns multi-block content for user and assistant.",
   ),
+}).refine((data) => data.workflow || data.workflowId, {
+  message: "Workflow ('workflow' or 'workflowId') must be provided.",
 });
 
 export const exportWorkflowTool = defineTool({
   name: "workflow_export",
   description:
-    "Exports a complete workflow graph as a portable JSON bundle. Supports recursive bundling of referenced child subworkflows, optional execution history, and direct export to a file path on disk. The exported bundle can be imported using workflow_import.",
+    "Exports a complete workflow graph as a portable JSON bundle. Supports workflow UUIDs, exact names, or slugs. Supports recursive bundling of referenced child subworkflows, optional execution history, and direct export to a file path on disk. The exported bundle can be imported using workflow_import.",
   schema: ExportWorkflowSchema,
-  execute: async ({ workflowId, includeSubworkflows, includeExecutions, filePath, format }) => {
-    const bundle = await exportWorkflowBundle(workflowId, {
+  execute: async ({
+    workflow,
+    workflowId,
+    includeSubworkflows,
+    includeExecutions,
+    filePath,
+    format,
+  }) => {
+    const targetWorkflow = workflow ?? workflowId!;
+    const wfCheck = await requireWorkflow(targetWorkflow);
+    if ("error" in wfCheck) return wfCheck.error;
+
+    const actualWfId = wfCheck.workflow.id;
+    const bundle = await exportWorkflowBundle(actualWfId, {
       includeSubworkflows,
       includeExecutions,
     });
 
     if (!bundle) {
-      return createErrorResponse(`Workflow "${workflowId}" was not found.`);
+      return createErrorResponse(`Workflow "${actualWfId}" was not found.`);
     }
 
     if (filePath) {

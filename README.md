@@ -2,14 +2,43 @@
 
 A Model Context Protocol (MCP) server for designing, validating, executing, and visualizing
 structured workflows, Directed Acyclic Graphs (DAGs), gated review-fix loops, subworkflows, and
-human-in-the-loop interactions. Powered by Deno and Deno KV for lightweight local persistence.
+human-in-the-loop interactions.
+
+Equipped with **multi-tenant user-scoped persistence**, **Passkey (Touch ID / Face ID / Windows
+Hello) biometric authentication (0 third-party setup required)**, and **serverless HTTP / SSE
+transports** ready for deployment on Deno Deploy or any serverless runtime.
 
 ---
 
 ## Features
 
-- **Workflow & Graph Management**: Create, list, inspect, and delete workflow graphs with arbitrary
-  node-and-edge topologies.
+- **Zero UUID Lookup Overhead (Name, Slug, & Path Resolution)**:
+  - Reference workflows and nodes by **UUID**, **Name**, **Slug**, or **Hierarchical Path** (e.g.
+    `workflow_get({ workflow: "review-workflow/security" })`,
+    `node_edit({ workflow: "review-workflow", node: "Step 5-web", ... })`).
+- **Cross-Workflow Search (`workflow_search`)**:
+  - Instantly search across all standalone workflows and nested subworkflows for keywords, phrases,
+    or boolean expressions (`authentication OR passkey`) with contextual line excerpts.
+- **Atomic Multi-Node Updates (`workflow_patch`)**:
+  - Batch edit multiple nodes in a single atomic tool call, eliminating sequential roundtrip tool
+    call overhead.
+- **Recursive Hierarchical View (`workflow_tree`)**:
+  - Recursively expand and display complete subworkflow hierarchies up to configurable depth in
+    formatted ASCII diagrams and structured JSON.
+- **Zero 3rd-Party Biometric Authentication (Passkeys / WebAuthn)**:
+  - Sign in or register in 1-click using native **Touch ID, Face ID, Windows Hello, or hardware
+    security keys** in the browser.
+  - Zero developer consoles, zero client secrets, zero 3rd-party dependencies.
+  - Generates persistent **Bearer API Tokens** (`wf_...`) in 1-click to connect Claude Desktop,
+    Cursor, and CLI agents to your scoped workflows.
+- **Serverless-First HTTP Transports**:
+  - **Stateless HTTP JSON-RPC (`POST /mcp` / `POST /`)**: Designed specifically for serverless
+    architectures (Deno Deploy, Cloudflare, Lambda) with no persistent socket overhead.
+  - **Streamable SSE (`GET /sse` + `POST /message`)**: Standard MCP Server-Sent Events transport.
+- **Multi-Tenant User Isolation**: All workflows, nodes, edges, and executions are scoped by
+  `userId` in Deno KV (`["users", userId, ...]`).
+- **Workflow & Graph Management**: Create, list, inspect, patch, search, tree, and delete workflow
+  graphs with arbitrary topologies.
 - **Rich Node Types**: Supports `start`, `step`, `decision`, `subworkflow`, `user_interaction`, and
   `end` nodes.
 - **Graph Validation & Heuristics**: Validates graph connectivity, reachability, start/end node
@@ -17,50 +46,137 @@ human-in-the-loop interactions. Powered by Deno and Deno KV for lightweight loca
   extraction.
 - **Interactive & Multi-Project Execution**: Execute workflows step-by-step with state isolation,
   branch conditions, iteration tracking, and guardrails against infinite loops.
-- **Mermaid Visualization**: Export visual Mermaid diagrams of workflow states and graphs.
+- **Mermaid & Interactive HTML Visualization**: Export visual Mermaid diagrams of workflow states
+  and interactive HTML dashboards with Server-Side Rendered (SSR) vector graphics and zero external
+  CDN scripts.
 - **Export & Import Bundles**: Export full workflows with recursive subworkflows and execution runs
-  into portable JSON bundles, and import/clone with automatic ID remapping and DAG validation.
-- **Multi-Audience Formatting**: Outputs formatted markdown for user review and structured JSON
-  payloads for AI assistants.
+  into portable JSON bundles with automatic ID remapping.
 
 ---
 
-## Prerequisites
+## Quick Start (Local Development)
 
-- [Deno](https://deno.land/) (v1.40+ or v2.0+) installed and available in your `PATH`.
-  ```bash
-  # Check your Deno installation
-  deno --version
-  ```
+### 1. Run Local HTTP Server
 
----
+```bash
+# Start the HTTP serverless MCP server on port 8000
+deno task serve
 
-## How to Load in Cursor
+# Or in watch mode for development
+deno task dev:server
+```
 
-You can configure Cursor to connect to this MCP server using either the Cursor Settings UI or a
-configuration file.
+Visit `http://localhost:8000` in your browser to test Passkey biometric sign-in and token
+generation!
 
-### Option 1: Using Cursor Settings UI
+### 2. Run Local Stdio CLI Mode (for local IDEs)
 
-1. Open **Cursor**.
-2. Go to **Settings** (`Cmd + ,` on macOS or `Ctrl + ,` on Windows/Linux) $\rightarrow$ **Features**
-   $\rightarrow$ **MCP**.
-3. Click **"+ Add New MCP Server"**.
-4. Fill in the details:
-   - **Name**: `workflow-mcp`
-   - **Type**: `command` (stdio)
-   - **Command**:
-     ```bash
-     deno run --unstable-kv --allow-read --allow-write /Users/Shared/workflow-mcp/main.ts
-     ```
-5. Click **Add** or **Save**. Cursor will start the server over stdio and discover all tools.
+```bash
+deno task dev
+```
 
 ---
 
-### Option 2: Using `mcp.json`
+## Serverless Remote Deployment (Deno Deploy)
 
-Add the server configuration to your global Cursor MCP configuration file (`~/.cursor/mcp.json`) or
-to your workspace configuration (`.cursor/mcp.json`):
+Deploying to [Deno Deploy](https://deno.com/deploy) takes just seconds with built-in zero-config
+Deno KV.
+
+### 1. Deploy via GitHub or `deployctl`
+
+```bash
+# Install deployctl if needed
+deno install -Arf jsr:@deno/deployctl
+
+# Deploy directly
+deployctl deploy --project=workflow-mcp --entrypoint=http_server.ts
+```
+
+### 2. Environment Variables
+
+| Variable               | Description                                                            |
+| :--------------------- | :--------------------------------------------------------------------- |
+| `PORT`                 | HTTP port (defaults to `8000`).                                        |
+| `ALLOW_HEADER_AUTH`    | Set to `1` to enable `X-User-Id` header authentication in testing/dev. |
+| `GITHUB_CLIENT_ID`     | (Optional) GitHub OAuth App Client ID.                                 |
+| `GITHUB_CLIENT_SECRET` | (Optional) GitHub OAuth App Client Secret.                             |
+| `GOOGLE_CLIENT_ID`     | (Optional) Google OAuth Client ID.                                     |
+| `GOOGLE_CLIENT_SECRET` | (Optional) Google OAuth Client Secret.                                 |
+
+---
+
+## Client Configuration
+
+You can connect your AI assistant (Claude Desktop, Cursor, Antigravity, Windsurf, Roo Code, etc.)
+using either **Remote Serverless HTTP/SSE Mode** or **Local CLI / Stdio Mode**.
+
+---
+
+### Option A: Remote Serverless Mode (HTTP / SSE)
+
+Connect to a remote instance deployed on Deno Deploy or your self-hosted server with multi-tenant
+user isolation and Passkey authentication.
+
+#### 1. Generate Your API Token
+
+1. Open your deployed server URL in your browser (e.g. `https://your-domain.deno.dev` or
+   `http://localhost:8000`).
+2. Sign In or Register with your **Passkey (Touch ID / Face ID / Windows Hello)**.
+3. Click **"⚡ Generate New API Token"** and copy your token (`wf_...`).
+
+#### 2. Claude Desktop (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "url": "https://your-domain.deno.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer wf_your_api_token"
+      }
+    }
+  }
+}
+```
+
+#### 3. Cursor (`.cursor/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "url": "https://your-domain.deno.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer wf_your_api_token"
+      }
+    }
+  }
+}
+```
+
+#### 4. Antigravity / Gemini CLI (`mcp_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "url": "https://your-domain.deno.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer wf_your_api_token"
+      }
+    }
+  }
+}
+```
+
+---
+
+### Option B: Local CLI / Stdio Mode
+
+Run the MCP server directly on your local machine over standard I/O (stdio) with local Deno KV
+storage. Zero server deployment or network setup required.
+
+#### 1. Claude Desktop (`claude_desktop_config.json`)
 
 ```json
 {
@@ -72,22 +188,15 @@ to your workspace configuration (`.cursor/mcp.json`):
         "--unstable-kv",
         "--allow-read",
         "--allow-write",
-        "/Users/Shared/workflow-mcp/main.ts"
+        "--allow-env",
+        "/absolute/path/to/workflow-mcp/main.ts"
       ]
     }
   }
 }
 ```
 
-> **Tip**: If `deno` is not in Cursor's environment PATH, use the absolute path to your Deno binary
-> (e.g. `/Users/<your-user>/.deno/bin/deno` or `/opt/homebrew/bin/deno`).
-
----
-
-## Setup in Claude Desktop
-
-Add the following to your `claude_desktop_config.json` (located at
-`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+#### 2. Cursor (`.cursor/mcp.json`)
 
 ```json
 {
@@ -99,7 +208,28 @@ Add the following to your `claude_desktop_config.json` (located at
         "--unstable-kv",
         "--allow-read",
         "--allow-write",
-        "/Users/Shared/workflow-mcp/main.ts"
+        "--allow-env",
+        "/absolute/path/to/workflow-mcp/main.ts"
+      ]
+    }
+  }
+}
+```
+
+#### 3. Antigravity / Gemini CLI (`mcp_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "command": "deno",
+      "args": [
+        "run",
+        "--unstable-kv",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "/absolute/path/to/workflow-mcp/main.ts"
       ]
     }
   }
@@ -110,41 +240,41 @@ Add the following to your `claude_desktop_config.json` (located at
 
 ## Available MCP Tools
 
-| Tool                           | Description                                                                           |
-| :----------------------------- | :------------------------------------------------------------------------------------ |
-| `workflow_create`              | Create a new named workflow.                                                          |
-| `workflow_list`                | List all workflows with metadata and status.                                          |
-| `workflow_get`                 | Retrieve full workflow details (nodes and edges).                                     |
-| `workflow_delete`              | Atomically delete a workflow and all associated nodes/edges.                          |
-| `node_add`                     | Add a node (`start`, `step`, `decision`, `subworkflow`, `user_interaction`, `end`).   |
-| `node_edit`                    | Edit an existing node's name, description, type, or config.                           |
-| `node_delete`                  | Delete a node and its attached edges.                                                 |
-| `node_get`                     | Retrieve detailed node info.                                                          |
-| `node_list`                    | List all nodes in a workflow.                                                         |
-| `node_connect`                 | Connect two nodes with an optional branch condition.                                  |
-| `node_disconnect`              | Remove an edge between nodes.                                                         |
-| `workflow_start`               | Begin an execution run instance and return initial actionable steps.                  |
-| `workflow_next`                | Complete a node and advance the execution run along outbound edges.                   |
-| `workflow_reset`               | Reset an execution run back to initial state.                                         |
-| `workflow_validate`            | Validate workflow DAG integrity, cycle rules, and heuristics.                         |
-| `workflow_visualize`           | Generate static Mermaid diagrams or export rich interactive HTML visualizers to file. |
-| `workflow_extract_subworkflow` | Extract a chain of nodes into an independent child subworkflow.                       |
-| `workflow_export`              | Export a workflow graph as a portable JSON bundle (bundles subworkflows & history).   |
-| `workflow_import`              | Import a workflow bundle with ID remapping/cloning, overwrite, and validation.        |
+| Tool                           | Description                                                                         |
+| :----------------------------- | :---------------------------------------------------------------------------------- |
+| `workflow_create`              | Create a new named workflow in the user's scope.                                    |
+| `workflow_list`                | List all workflows with metadata and status for current user.                       |
+| `workflow_get`                 | Retrieve full workflow details (nodes and edges), with optional subworkflow bundle. |
+| `workflow_search`              | Cross-workflow keyword/boolean search across names, prompts, descriptions, configs. |
+| `workflow_patch`               | Batch atomic updates for multiple nodes in a workflow graph in one call.            |
+| `workflow_tree`                | Recursive hierarchical ASCII and JSON view of nested child subworkflows.            |
+| `workflow_delete`              | Atomically delete a workflow and all associated nodes/edges.                        |
+| `node_add`                     | Add a node (`start`, `step`, `decision`, `subworkflow`, `user_interaction`, `end`). |
+| `node_edit`                    | Edit an existing node's name, description, type, or config.                         |
+| `node_delete`                  | Delete a node and its attached edges.                                               |
+| `node_get`                     | Retrieve detailed node info.                                                        |
+| `node_list`                    | List all nodes in a workflow.                                                       |
+| `node_connect`                 | Connect two nodes with an optional branch condition.                                |
+| `node_disconnect`              | Remove an edge between nodes.                                                       |
+| `workflow_start`               | Begin an execution run instance and return initial actionable steps.                |
+| `workflow_next`                | Complete a node and advance the execution run along outbound edges.                 |
+| `workflow_reset`               | Reset an execution run back to initial state.                                       |
+| `workflow_validate`            | Validate workflow DAG integrity, cycle rules, and heuristics.                       |
+| `workflow_visualize`           | Generate static Mermaid diagrams or export rich interactive HTML visualizers.       |
+| `workflow_extract_subworkflow` | Extract a chain of nodes into an independent child subworkflow.                     |
+| `workflow_export`              | Export a workflow graph as a portable JSON bundle.                                  |
+| `workflow_import`              | Import a workflow bundle with ID remapping/cloning, overwrite, and validation.      |
 
 ---
 
-## Development
+## Development & Testing
 
 ```bash
-# Run unit tests
+# Run full unit and integration test suite
 deno task test
 
 # Run tests with code coverage
 deno task test:coverage
-
-# Start server in watch mode for development
-deno task dev
 
 # Type check, lint, and format check
 deno task check
