@@ -107,15 +107,24 @@ deployctl deploy --project=workflow-mcp --entrypoint=http_server.ts
 
 ## Client Configuration
 
-### 1. Generate Your API Token
+You can connect your AI assistant (Claude Desktop, Cursor, Antigravity, Windsurf, Roo Code, etc.)
+using either **Remote Serverless HTTP/SSE Mode** or **Local CLI / Stdio Mode**.
 
-1. Open your deployed URL in your browser (`https://your-domain.deno.dev`).
-2. Register or Sign In with your **Touch ID / Face ID / Passkey**.
+---
+
+### Option A: Remote Serverless Mode (HTTP / SSE)
+
+Connect to a remote instance deployed on Deno Deploy or your self-hosted server with multi-tenant
+user isolation and Passkey authentication.
+
+#### 1. Generate Your API Token
+
+1. Open your deployed server URL in your browser (e.g. `https://your-domain.deno.dev` or
+   `http://localhost:8000`).
+2. Sign In or Register with your **Passkey (Touch ID / Face ID / Windows Hello)**.
 3. Click **"⚡ Generate New API Token"** and copy your token (`wf_...`).
 
-### 2. Connect Claude Desktop
-
-Add to your `claude_desktop_config.json`:
+#### 2. Claude Desktop (`claude_desktop_config.json`)
 
 ```json
 {
@@ -130,9 +139,7 @@ Add to your `claude_desktop_config.json`:
 }
 ```
 
-### 3. Connect Cursor
-
-In `.cursor/mcp.json` or Cursor Settings $\rightarrow$ Features $\rightarrow$ MCP:
+#### 3. Cursor (`.cursor/mcp.json`)
 
 ```json
 {
@@ -142,6 +149,88 @@ In `.cursor/mcp.json` or Cursor Settings $\rightarrow$ Features $\rightarrow$ MC
       "headers": {
         "Authorization": "Bearer wf_your_api_token"
       }
+    }
+  }
+}
+```
+
+#### 4. Antigravity / Gemini CLI (`mcp_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "url": "https://your-domain.deno.dev/mcp",
+      "headers": {
+        "Authorization": "Bearer wf_your_api_token"
+      }
+    }
+  }
+}
+```
+
+---
+
+### Option B: Local CLI / Stdio Mode
+
+Run the MCP server directly on your local machine over standard I/O (stdio) with local Deno KV
+storage. Zero server deployment or network setup required.
+
+#### 1. Claude Desktop (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "command": "deno",
+      "args": [
+        "run",
+        "--unstable-kv",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "/absolute/path/to/workflow-mcp/main.ts"
+      ]
+    }
+  }
+}
+```
+
+#### 2. Cursor (`.cursor/mcp.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "command": "deno",
+      "args": [
+        "run",
+        "--unstable-kv",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "/absolute/path/to/workflow-mcp/main.ts"
+      ]
+    }
+  }
+}
+```
+
+#### 3. Antigravity / Gemini CLI (`mcp_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "workflow-mcp": {
+      "command": "deno",
+      "args": [
+        "run",
+        "--unstable-kv",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "/absolute/path/to/workflow-mcp/main.ts"
+      ]
     }
   }
 }

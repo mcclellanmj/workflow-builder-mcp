@@ -132,9 +132,11 @@ export function renderDashboardHtml(origin: string): string {
         <pre><code id="tokenValue">-</code><button class="copy-btn" onclick="copyToken()">Copy Token</button></pre>
       </div>
 
-      <h2 style="margin-top: 24px;">⚙️ Client Setup Configuration</h2>
-      <p>Paste this configuration into your <code>claude_desktop_config.json</code> or Cursor <code>.cursor/mcp.json</code>:</p>
+      <h2 style="margin-top: 24px;">⚙️ Client Setup Configurations</h2>
+      <p>Configure Claude Desktop, Cursor, Antigravity, or other MCP clients:</p>
       
+      <h3 style="font-size: 0.95rem; margin-top: 14px; color: #38bdf8;">Option A: Remote Server Mode (HTTP / SSE)</h3>
+      <p style="font-size: 0.85rem; color: #94a3b8;">Connects to this server instance using your Bearer API token:</p>
       <pre><code id="configSnippet">{
   "mcpServers": {
     "workflow-mcp": {
@@ -144,7 +146,25 @@ export function renderDashboardHtml(origin: string): string {
       }
     }
   }
-}</code><button class="copy-btn" onclick="copyConfig()">Copy Config</button></pre>
+}</code><button class="copy-btn" onclick="copyConfig()">Copy Remote Config</button></pre>
+
+      <h3 style="font-size: 0.95rem; margin-top: 16px; color: #a855f7;">Option B: Local CLI / Stdio Mode</h3>
+      <p style="font-size: 0.85rem; color: #94a3b8;">Runs the MCP server locally over standard I/O (stdio):</p>
+      <pre><code id="stdioConfigSnippet">{
+  "mcpServers": {
+    "workflow-mcp": {
+      "command": "deno",
+      "args": [
+        "run",
+        "--unstable-kv",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "/absolute/path/to/workflow-mcp/main.ts"
+      ]
+    }
+  }
+}</code><button class="copy-btn" onclick="copyStdioConfig()">Copy Stdio Config</button></pre>
     </div>
 
     <div class="card">
@@ -473,7 +493,13 @@ export function renderDashboardHtml(origin: string): string {
       function copyConfig() {
         const config = document.getElementById("configSnippet").textContent;
         navigator.clipboard.writeText(config);
-        showAlert("Configuration JSON copied to clipboard!", false);
+        showAlert("Remote configuration JSON copied to clipboard!", false);
+      }
+
+      function copyStdioConfig() {
+        const config = document.getElementById("stdioConfigSnippet").textContent;
+        navigator.clipboard.writeText(config);
+        showAlert("Stdio configuration JSON copied to clipboard!", false);
       }
 
       async function signOutUser() {
