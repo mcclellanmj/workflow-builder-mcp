@@ -276,7 +276,9 @@ Deno.test("Memory REST Endpoints - Recall & Access Audit Logging (GET /api/memor
     assertEquals(logData.records.length, 2);
 
     // Verify record fields
-    const expertRecord = logData.records.find((r: { accessedBy: string }) => r.accessedBy === "agent-db-expert");
+    const expertRecord = logData.records.find((r: { accessedBy: string }) =>
+      r.accessedBy === "agent-db-expert"
+    );
     assert(expertRecord, "Expert access record should exist");
     assertEquals(expertRecord.memoryId, memId);
     assertEquals(expertRecord.taskId, "tk-task-01");
@@ -593,7 +595,10 @@ Deno.test("Role & Journal REST Endpoints - Full Lifecycle (Roles, Enriched Journ
     );
     assertEquals(writeJournalRes2.status, 200);
     const journalData2 = await writeJournalRes2.json();
-    assertEquals(journalData2.journal.entry, "Phase 2: Verified multi-tenant isolation and Web UI dashboards");
+    assertEquals(
+      journalData2.journal.entry,
+      "Phase 2: Verified multi-tenant isolation and Web UI dashboards",
+    );
     assertEquals(journalData2.journal.writtenBy, userId);
 
     // 7. POST /api/journals error handling (missing entry/content)
@@ -616,7 +621,10 @@ Deno.test("Role & Journal REST Endpoints - Full Lifecycle (Roles, Enriched Journ
     );
     assertEquals(readJournalRes.status, 200);
     const readJournalData = await readJournalRes.json();
-    assertEquals(readJournalData.journal.entry, "Phase 2: Verified multi-tenant isolation and Web UI dashboards");
+    assertEquals(
+      readJournalData.journal.entry,
+      "Phase 2: Verified multi-tenant isolation and Web UI dashboards",
+    );
 
     // 9. GET /api/roles returns roles enriched with their latest journal
     const listRolesRes = await handleHttpRequest(
@@ -631,7 +639,10 @@ Deno.test("Role & Journal REST Endpoints - Full Lifecycle (Roles, Enriched Journ
     const roleItem = listRolesData.roles[0];
     assertEquals(roleItem.name, "qa-engineer");
     assertExists(roleItem.journal);
-    assertEquals(roleItem.journal.entry, "Phase 2: Verified multi-tenant isolation and Web UI dashboards");
+    assertEquals(
+      roleItem.journal.entry,
+      "Phase 2: Verified multi-tenant isolation and Web UI dashboards",
+    );
   } finally {
     kv.close();
   }
@@ -816,7 +827,10 @@ Deno.test("Web UI Routes - HTML Rendering and Context / Role Journal Elements (/
 
     // 4. Verify Task Detail modal contains Context & Role Journal elements
     assert(tasksHtml.includes('id="taskContextSection"'));
-    assert(tasksHtml.includes("Context &amp; Role Journal") || tasksHtml.includes("Context & Role Journal"));
+    assert(
+      tasksHtml.includes("Context &amp; Role Journal") ||
+        tasksHtml.includes("Context & Role Journal"),
+    );
     assert(tasksHtml.includes('id="taskRoleJournalContainer"'));
     assert(tasksHtml.includes('id="taskMemoriesContainer"'));
     assert(tasksHtml.includes('id="detailContext"'));

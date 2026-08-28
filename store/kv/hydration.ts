@@ -3,7 +3,13 @@
  */
 
 import { resolveUserId } from "./client.ts";
-import { addDependency, computeReadyFrontier, createTask } from "./tasks.ts";
+import {
+  addDependencies,
+  computeReadyFrontier,
+  type CreateTaskInput,
+  createTasks,
+  generateTaskId,
+} from "./tasks.ts";
 import { listNodes } from "./nodes.ts";
 import { listEdges } from "./edges.ts";
 import { resolveWorkflow } from "../../mcp/resolvers.ts";
@@ -32,8 +38,8 @@ export interface HydrateWorkflowInput {
 export interface HydratedNodeMapping {
   nodeId: string;
   nodeType: NodeType;
-  task?: Task;
-  epic?: Task;
+  taskId?: string;
+  epicId?: string;
   entryTaskIds: string[];
   exitTaskIds: string[];
 }
@@ -123,20 +129,21 @@ function buildNodeTaskDescription(node: WorkflowNode): string {
 }
 
 /**
- * Recursive helper to hydrate a subworkflow node into a child epic ("an epic in an epic").
+ * Recursive helper to plan subworkflow hydration into child epics and tasks.
  */
-async function hydrateSubworkflow(
+async function planSubworkflow(
   subwfNode: WorkflowNode,
   parentEpicId: TaskId,
   rootWorkflowId: string,
   uid: string,
+  taskAccumulator: CreateTaskInput[],
+  depAccumulator: Array<{ fromTaskId: TaskId; toTaskId: TaskId; type?: DependencyType }>,
   defaultRole?: string,
   defaultPriority?: TaskPriority,
 ): Promise<{
-  childEpic: Task;
-  childEpics: Task[];
-  childTasks: Task[];
-  childDeps: TaskDependency[];
+  childEpicId: string;
+  epicIds: string[];
+  taskIds: string[];
   entryTaskIds: string[];
   exitTaskIds: string[];
 }> {
@@ -171,8 +178,9 @@ async function hydrateSubworkflow(
   const endNodeIds = new Set(endNodes.map((n: WorkflowNode) => n.id));
   const backEdges = startNode ? findBackEdges(startNode.id, edges) : new Set<string>();
 
-  // Create child epic under parent epic
-  const childEpic = await createTask({
+  const childEpicId = generateTaskId(subwfNode.name || childWf.name);
+  taskAccumulator.push({
+    id: childEpicId,
     title: subwfNode.name || childWf.name,
     description: subwfNode.description || childWf.description ||
       `Subworkflow epic for "${childWf.name}"`,
@@ -183,14 +191,12 @@ async function hydrateSubworkflow(
     nodeId: subwfNode.id,
     priority: defaultPriority ?? "medium",
     role: (subwfNode.config?.role as string) ?? defaultRole,
-  }, uid);
+  });
 
-  const childEpics: Task[] = [childEpic];
-  const childTasks: Task[] = [];
-  const childDeps: TaskDependency[] = [];
+  const epicIds: string[] = [childEpicId];
+  const taskIds: string[] = [];
   const nodeMap = new Map<string, HydratedNodeMapping>();
 
-  // Hydrate nodes of child workflow
   for (const node of nodes) {
     if (node.type === "start" || node.type === "end") {
       nodeMap.set(node.id, {
@@ -203,22 +209,23 @@ async function hydrateSubworkflow(
     }
 
     if (node.type === "subworkflow") {
-      const nested = await hydrateSubworkflow(
+      const nested = await planSubworkflow(
         node,
-        childEpic.id,
+        childEpicId,
         rootWorkflowId,
         uid,
+        taskAccumulator,
+        depAccumulator,
         defaultRole,
         defaultPriority,
       );
-      childEpics.push(...nested.childEpics);
-      childTasks.push(...nested.childTasks);
-      childDeps.push(...nested.childDeps);
+      epicIds.push(...nested.epicIds);
+      taskIds.push(...nested.taskIds);
 
       nodeMap.set(node.id, {
         nodeId: node.id,
         nodeType: "subworkflow",
-        epic: nested.childEpic,
+        epicId: nested.childEpicId,
         entryTaskIds: nested.entryTaskIds,
         exitTaskIds: nested.exitTaskIds,
       });
@@ -226,26 +233,28 @@ async function hydrateSubworkflow(
       const taskRole = (node.config?.role as string) ||
         (node.runInSubAgent ? "subagent" : defaultRole);
       const taskPriority = (node.config?.priority as TaskPriority) || defaultPriority || "medium";
+      const taskId = generateTaskId(node.name);
 
-      const task = await createTask({
+      taskAccumulator.push({
+        id: taskId,
         title: node.name,
         description: buildNodeTaskDescription(node),
         type: "task",
         status: "open",
-        parentTaskId: childEpic.id,
+        parentTaskId: childEpicId,
         workflowId: rootWorkflowId,
         nodeId: node.id,
         role: taskRole,
         priority: taskPriority,
-      }, uid);
+      });
 
-      childTasks.push(task);
+      taskIds.push(taskId);
       nodeMap.set(node.id, {
         nodeId: node.id,
         nodeType: node.type,
-        task,
-        entryTaskIds: [task.id],
-        exitTaskIds: [task.id],
+        taskId,
+        entryTaskIds: [taskId],
+        exitTaskIds: [taskId],
       });
     }
   }
@@ -266,8 +275,7 @@ async function hydrateSubworkflow(
     for (const fromId of fromMapping.exitTaskIds) {
       for (const toId of toMapping.entryTaskIds) {
         if (fromId !== toId) {
-          const dep = await addDependency(fromId, toId, depType, uid);
-          childDeps.push(dep);
+          depAccumulator.push({ fromTaskId: fromId, toTaskId: toId, type: depType });
         }
       }
     }
@@ -296,18 +304,17 @@ async function hydrateSubworkflow(
   }
 
   // Fallback for entry/exit if not directly connected to start/end
-  if (entryTaskIds.length === 0 && childTasks.length > 0) {
-    entryTaskIds.push(childTasks[0].id);
+  if (entryTaskIds.length === 0 && taskIds.length > 0) {
+    entryTaskIds.push(taskIds[0]);
   }
-  if (exitTaskIds.length === 0 && childTasks.length > 0) {
-    exitTaskIds.push(childTasks[childTasks.length - 1].id);
+  if (exitTaskIds.length === 0 && taskIds.length > 0) {
+    exitTaskIds.push(taskIds[taskIds.length - 1]);
   }
 
   return {
-    childEpic,
-    childEpics,
-    childTasks,
-    childDeps,
+    childEpicId,
+    epicIds,
+    taskIds,
     entryTaskIds,
     exitTaskIds,
   };
@@ -347,8 +354,13 @@ export async function hydrateWorkflowToEpic(
   const endNodeIds = new Set(endNodes.map((n: WorkflowNode) => n.id));
   const backEdges = startNode ? findBackEdges(startNode.id, edges) : new Set<string>();
 
-  // 1. Create root Epic task
-  const rootEpic = await createTask({
+  const allTaskInputs: CreateTaskInput[] = [];
+  const allDepInputs: Array<{ fromTaskId: TaskId; toTaskId: TaskId; type?: DependencyType }> = [];
+
+  // 1. Plan root Epic task
+  const rootEpicId = generateTaskId(input.title?.trim() || wf.name);
+  allTaskInputs.push({
+    id: rootEpicId,
     title: input.title?.trim() || wf.name,
     description: input.description?.trim() || wf.description ||
       `Epic hydrated from workflow "${wf.name}"`,
@@ -358,11 +370,10 @@ export async function hydrateWorkflowToEpic(
     workflowId: wf.id,
     priority: input.priority ?? "medium",
     role: input.role,
-  }, uid);
+  });
 
-  const allEpics: Task[] = [rootEpic];
-  const allTasks: Task[] = [];
-  const allDependencies: TaskDependency[] = [];
+  const epicIds: string[] = [rootEpicId];
+  const taskIds: string[] = [];
   const nodeMap = new Map<string, HydratedNodeMapping>();
 
   // 2. Hydrate actionable nodes into tasks or nested epics
@@ -378,23 +389,23 @@ export async function hydrateWorkflowToEpic(
     }
 
     if (node.type === "subworkflow") {
-      // Nested subworkflow -> epic in an epic!
-      const nested = await hydrateSubworkflow(
+      const nested = await planSubworkflow(
         node,
-        rootEpic.id,
+        rootEpicId,
         wf.id,
         uid,
+        allTaskInputs,
+        allDepInputs,
         input.role,
         input.priority,
       );
-      allEpics.push(...nested.childEpics);
-      allTasks.push(...nested.childTasks);
-      allDependencies.push(...nested.childDeps);
+      epicIds.push(...nested.epicIds);
+      taskIds.push(...nested.taskIds);
 
       nodeMap.set(node.id, {
         nodeId: node.id,
         nodeType: "subworkflow",
-        epic: nested.childEpic,
+        epicId: nested.childEpicId,
         entryTaskIds: nested.entryTaskIds,
         exitTaskIds: nested.exitTaskIds,
       });
@@ -402,26 +413,28 @@ export async function hydrateWorkflowToEpic(
       const taskRole = (node.config?.role as string) ||
         (node.runInSubAgent ? "subagent" : input.role);
       const taskPriority = (node.config?.priority as TaskPriority) || input.priority || "medium";
+      const taskId = generateTaskId(node.name);
 
-      const task = await createTask({
+      allTaskInputs.push({
+        id: taskId,
         title: node.name,
         description: buildNodeTaskDescription(node),
         type: "task",
         status: "open",
-        parentTaskId: rootEpic.id,
+        parentTaskId: rootEpicId,
         workflowId: wf.id,
         nodeId: node.id,
         role: taskRole,
         priority: taskPriority,
-      }, uid);
+      });
 
-      allTasks.push(task);
+      taskIds.push(taskId);
       nodeMap.set(node.id, {
         nodeId: node.id,
         nodeType: node.type,
-        task,
-        entryTaskIds: [task.id],
-        exitTaskIds: [task.id],
+        taskId,
+        entryTaskIds: [taskId],
+        exitTaskIds: [taskId],
       });
     }
   }
@@ -442,34 +455,41 @@ export async function hydrateWorkflowToEpic(
     for (const fromId of fromMapping.exitTaskIds) {
       for (const toId of toMapping.entryTaskIds) {
         if (fromId !== toId) {
-          const dep = await addDependency(fromId, toId, depType, uid);
-          allDependencies.push(dep);
+          allDepInputs.push({ fromTaskId: fromId, toTaskId: toId, type: depType });
         }
       }
     }
 
     // If target is a subworkflow epic, also have prerequisite exit tasks block the subworkflow epic
-    if (toMapping.epic) {
+    if (toMapping.epicId) {
       for (const fromId of fromMapping.exitTaskIds) {
-        if (fromId !== toMapping.epic.id) {
-          const dep = await addDependency(fromId, toMapping.epic.id, depType, uid);
-          allDependencies.push(dep);
+        if (fromId !== toMapping.epicId) {
+          allDepInputs.push({ fromTaskId: fromId, toTaskId: toMapping.epicId, type: depType });
         }
       }
     }
 
     // If source is a subworkflow epic, also have the child epic block target entry tasks
-    if (fromMapping.epic) {
+    if (fromMapping.epicId) {
       for (const toId of toMapping.entryTaskIds) {
-        if (fromMapping.epic.id !== toId) {
-          const dep = await addDependency(fromMapping.epic.id, toId, depType, uid);
-          allDependencies.push(dep);
+        if (fromMapping.epicId !== toId) {
+          allDepInputs.push({ fromTaskId: fromMapping.epicId, toTaskId: toId, type: depType });
         }
       }
     }
   }
 
-  // 4. Compute ready frontier for tasks created in this hydration
+  // 4. Persist all tasks and dependencies in bulk atomic batches
+  const createdTasks = await createTasks(allTaskInputs, uid);
+  const createdTaskMap = new Map<string, Task>(createdTasks.map((t) => [t.id, t]));
+
+  const createdDeps = await addDependencies(allDepInputs, uid);
+
+  const rootEpic = createdTaskMap.get(rootEpicId)!;
+  const allEpics = epicIds.map((id) => createdTaskMap.get(id)!).filter(Boolean);
+  const allTasks = taskIds.map((id) => createdTaskMap.get(id)!).filter(Boolean);
+
+  // 5. Compute ready frontier for tasks created in this hydration
   const taskIdsSet = new Set(allTasks.map((t) => t.id));
   const rawReady = await computeReadyFrontier({
     workflowId: wf.id,
@@ -481,7 +501,7 @@ export async function hydrateWorkflowToEpic(
   const summary = {
     totalEpics: allEpics.length,
     totalTasks: allTasks.length,
-    totalDependencies: allDependencies.length,
+    totalDependencies: createdDeps.length,
     readyTasksCount: readyTasks.length,
   };
 
@@ -507,7 +527,7 @@ export async function hydrateWorkflowToEpic(
   }
 
   const instructions =
-    `Workflow "${wf.name}" successfully hydrated into Epic "${rootEpic.id}" with ${allTasks.length} task(s) and ${allDependencies.length} dependency edge(s).\n\n` +
+    `Workflow "${wf.name}" successfully hydrated into Epic "${rootEpic.id}" with ${allTasks.length} task(s) and ${createdDeps.length} dependency edge(s).\n\n` +
     `🚀 **Ready to work immediately**: ${readyTasks.length} task(s) unblocked in the ready frontier.\n\n` +
     `**Recommended Next Steps for LLM**:\n` +
     `1. Call \`task_ready({ workflowId: "${wf.id}" })\` to inspect available work (or pick from \`readyTasks\` below).\n` +
@@ -521,7 +541,7 @@ export async function hydrateWorkflowToEpic(
     epic: rootEpic,
     epics: allEpics,
     tasks: allTasks,
-    dependencies: allDependencies,
+    dependencies: createdDeps,
     readyTasks,
     summary,
     instructions,

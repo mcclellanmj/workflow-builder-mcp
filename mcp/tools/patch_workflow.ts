@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { listEdges, listNodes, saveNodes } from "../../store/kv.ts";
+import { saveNodes } from "../../store/kv.ts";
 import type { WorkflowNode } from "../../store/types.ts";
 import { createErrorResponse } from "../registry.ts";
 import { analyzeWorkflowSuggestions } from "../../validation/heuristics.ts";
@@ -129,12 +129,9 @@ export const workflowPatchTool = defineTool({
     // 2. Persist all updated nodes atomically
     await saveNodes(updatedNodes);
 
-    // 3. Analyze graph heuristics
-    const [allNodes, allEdges] = await Promise.all([
-      listNodes(wf.id),
-      listEdges(wf.id),
-    ]);
-    const suggestions = analyzeWorkflowSuggestions(allNodes, allEdges);
+    // 3. Analyze graph heuristics using in-memory updated graph
+    const allNodes = Array.from(nodeMap.values());
+    const suggestions = analyzeWorkflowSuggestions(allNodes, graphCheck.edges);
 
     const markdown = formatPatchMarkdown(wf.name, wf.id, updatedNodes);
 

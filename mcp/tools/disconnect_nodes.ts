@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { deleteEdge, listEdges, listNodes } from "../../store/kv.ts";
+import { deleteEdge } from "../../store/kv.ts";
 import type { ValidationResult, WorkflowEdge } from "../../store/types.ts";
 import { createErrorResponse } from "../registry.ts";
 import { validateGraph } from "../../validation/graph.ts";
@@ -85,11 +85,8 @@ export const disconnectNodesTool = defineTool({
 
     await deleteEdge(wf.id, edgeToDelete.id);
 
-    const [remainingNodes, remainingEdges] = await Promise.all([
-      listNodes(wf.id),
-      listEdges(wf.id),
-    ]);
-    const validation = validateGraph(remainingNodes, remainingEdges);
+    const remainingEdges = edges.filter((edge) => edge.id !== edgeToDelete.id);
+    const validation = validateGraph(nodes, remainingEdges);
     const warnings = extractDisconnectionWarnings(validation);
 
     const responsePayload: {

@@ -109,7 +109,9 @@ export async function handleMemoryRoutes(
         tags = body.tags.split(",").map((t: string) => t.trim()).filter(Boolean);
       }
 
-      const content = typeof body.content === "string" ? body.content : JSON.stringify(body.content);
+      const content = typeof body.content === "string"
+        ? body.content
+        : JSON.stringify(body.content);
 
       const result = await saveMemory({
         key: body.key.trim(),
@@ -158,7 +160,8 @@ export async function handleMemoryRoutes(
       try {
         const taskId = url.searchParams.get("taskId") || undefined;
         const executionId = url.searchParams.get("executionId") || undefined;
-        const accessedBy = url.searchParams.get("accessedBy") || auth?.user?.name || auth?.userId || "api";
+        const accessedBy = url.searchParams.get("accessedBy") || auth?.user?.name || auth?.userId ||
+          "api";
 
         const memory = await recallMemory({
           id: memoryId,

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createErrorResponse } from "../registry.ts";
-import { deleteEdgesForNode, deleteNode } from "../../store/kv.ts";
+import { deleteEdges, deleteNode } from "../../store/kv.ts";
 import { defineTool, jsonResponse, requireNode } from "../helpers.ts";
 
 const DeleteNodeSchema = z.object({
@@ -32,15 +32,20 @@ export const deleteNodeTool = defineTool({
     const nodeCheck = await requireNode(targetWorkflow, targetNode);
     if ("error" in nodeCheck) return nodeCheck.error;
 
-    const { node: existingNode, workflow: wf } = nodeCheck;
+    const { node: existingNode, workflow: wf, edges } = nodeCheck;
     if (existingNode.type === "start") {
       return createErrorResponse(
         `Cannot delete the start node ("${existingNode.name}") of workflow "${wf.name}". Start nodes are required.`,
       );
     }
 
-    const [removedEdges] = await Promise.all([
-      deleteEdgesForNode(wf.id, existingNode.id),
+    const removedEdges = edges.filter(
+      (edge) => edge.fromNodeId === existingNode.id || edge.toNodeId === existingNode.id,
+    );
+    const edgeIds = removedEdges.map((e) => e.id);
+
+    await Promise.all([
+      deleteEdges(wf.id, edgeIds),
       deleteNode(wf.id, existingNode.id),
     ]);
 

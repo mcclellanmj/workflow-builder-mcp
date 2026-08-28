@@ -19,7 +19,7 @@ import type {
 import { resolveUserId } from "./client.ts";
 import { deleteWorkflow, getWorkflow, saveWorkflow } from "./workflows.ts";
 import { listNodes, saveNodes } from "./nodes.ts";
-import { listEdges, saveEdge } from "./edges.ts";
+import { listEdges, saveEdges } from "./edges.ts";
 import { listExecutions, saveExecution } from "./executions.ts";
 
 export interface ExportBundleOptions {
@@ -268,9 +268,7 @@ export async function importWorkflowBundle(
   for (const item of transformedItems) {
     await saveWorkflow(item.workflow, uid);
     await saveNodes(item.nodes, uid);
-    for (const edge of item.edges) {
-      await saveEdge(edge, uid);
-    }
+    await saveEdges(item.edges, uid);
     if (item.executions) {
       for (const exec of item.executions) {
         await saveExecution(exec, uid);

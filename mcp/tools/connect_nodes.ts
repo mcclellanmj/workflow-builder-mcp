@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { listEdges, listNodes, saveEdge } from "../../store/kv.ts";
+import { saveEdge } from "../../store/kv.ts";
 import type { WorkflowEdge, WorkflowNode } from "../../store/types.ts";
 import { createErrorResponse, type ToolCallResponse } from "../registry.ts";
 import { wouldCreateCycle } from "../../validation/graph.ts";
@@ -151,11 +151,8 @@ export const connectNodesTool = defineTool({
       );
     }
 
-    const [allNodes, allEdges] = await Promise.all([
-      listNodes(wf.id),
-      listEdges(wf.id),
-    ]);
-    const suggestions = analyzeWorkflowSuggestions(allNodes, allEdges);
+    const allEdges = [...existingEdges, newEdge];
+    const suggestions = analyzeWorkflowSuggestions(nodes, allEdges);
 
     return jsonResponse({
       ...newEdge,

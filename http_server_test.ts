@@ -737,10 +737,13 @@ Deno.test("HTTP Server - Memory and Role Journal REST API Lifecycle", async () =
 
     // 5. GET /api/memories with filters (scope, workflowId, tags)
     const listRes2 = await handleHttpRequest(
-      new Request("http://localhost:8000/api/memories?scope=workflow&workflowId=wf-main&tags=passkey", {
-        method: "GET",
-        headers: authHeaders,
-      }),
+      new Request(
+        "http://localhost:8000/api/memories?scope=workflow&workflowId=wf-main&tags=passkey",
+        {
+          method: "GET",
+          headers: authHeaders,
+        },
+      ),
     );
     assertEquals(listRes2.status, 200);
     const listData2 = await listRes2.json();
@@ -749,10 +752,13 @@ Deno.test("HTTP Server - Memory and Role Journal REST API Lifecycle", async () =
 
     // 6. GET /api/memories/:id - Recall memory (access log recorded)
     const recallRes = await handleHttpRequest(
-      new Request(`http://localhost:8000/api/memories/${mem1.id}?taskId=tk-123&executionId=ex-456`, {
-        method: "GET",
-        headers: authHeaders,
-      }),
+      new Request(
+        `http://localhost:8000/api/memories/${mem1.id}?taskId=tk-123&executionId=ex-456`,
+        {
+          method: "GET",
+          headers: authHeaders,
+        },
+      ),
     );
     assertEquals(recallRes.status, 200);
     const recallData = await recallRes.json();
@@ -835,7 +841,10 @@ Deno.test("HTTP Server - Memory and Role Journal REST API Lifecycle", async () =
     assertEquals(writeJournalRes.status, 200);
     const writeJournalData = await writeJournalRes.json();
     assertEquals(writeJournalData.journal.roleId, "developer");
-    assertEquals(writeJournalData.journal.entry, "Implemented Memory & Role Journal REST API routes");
+    assertEquals(
+      writeJournalData.journal.entry,
+      "Implemented Memory & Role Journal REST API routes",
+    );
     assertEquals(writeJournalData.journal.writtenBy, "developer-agent-1");
 
     // 12. GET /api/journals/:role - Read latest journal
@@ -848,7 +857,10 @@ Deno.test("HTTP Server - Memory and Role Journal REST API Lifecycle", async () =
     assertEquals(readJournalRes.status, 200);
     const readJournalData = await readJournalRes.json();
     assertEquals(readJournalData.journal.roleId, "developer");
-    assertEquals(readJournalData.journal.entry, "Implemented Memory & Role Journal REST API routes");
+    assertEquals(
+      readJournalData.journal.entry,
+      "Implemented Memory & Role Journal REST API routes",
+    );
 
     // 13. GET /api/roles - List roles enriched with latest journal
     const listRolesRes = await handleHttpRequest(
@@ -928,7 +940,7 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
     assert(tasksHtml.includes('id="journalsView"'));
     assert(tasksHtml.includes('id="tab-btn-tasks"'));
     assert(tasksHtml.includes('class="nav-tab active" id="tab-btn-tasks"'));
-    assert(tasksHtml.includes('switchMainTab'));
+    assert(tasksHtml.includes("switchMainTab"));
 
     // 2. GET /memories UI
     const memRes = await handleHttpRequest(
@@ -968,5 +980,3 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
     kv.close();
   }
 });
-
-

@@ -13,7 +13,8 @@ import {
   getDependencies,
   getTask,
   getTaskComments,
-  listTasks, listClosedTasks,
+  listClosedTasks,
+  listTasks,
   updateTask,
 } from "../store/kv.ts";
 import type { TaskPriority, TaskStatus, TaskType } from "../store/types.ts";
@@ -30,7 +31,9 @@ export async function handleTaskRoutes(
 
   // 1. Web UI: GET /tasks, GET /memories, GET /journals
   if ((path === "/tasks" || path === "/memories" || path === "/journals") && method === "GET") {
-    const initialTab = path === "/memories" ? "memories" : (path === "/journals" ? "journals" : "tasks");
+    const initialTab = path === "/memories"
+      ? "memories"
+      : (path === "/journals" ? "journals" : "tasks");
     const html = renderTaskKanbanHtml({
       origin: url.origin,
       userId: auth?.userId,
@@ -104,7 +107,6 @@ export async function handleTaskRoutes(
   }
   // 5. GET /api/tasks/closed - List closed tasks (optional endpoint)
   if (path === "/api/tasks/closed" && method === "GET") {
-    const status = "closed"; // implicit filter
     const role = url.searchParams.get("role") || undefined;
     const assignee = url.searchParams.get("assignee") || undefined;
     const type = url.searchParams.get("type") as TaskType | null;
@@ -113,7 +115,7 @@ export async function handleTaskRoutes(
     const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined;
 
     const tasks = await listClosedTasks({
-      status: status as any,
+      status: "closed",
       role,
       assignee,
       type: type || undefined,

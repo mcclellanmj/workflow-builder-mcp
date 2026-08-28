@@ -60,6 +60,31 @@ export async function getNode(
   return entry.value;
 }
 
+/** Fetches multiple nodes by their IDs in bulk using chunked kv.getMany calls. */
+export async function getNodes(
+  workflowId: WorkflowId,
+  nodeIds: string[],
+  userId?: string,
+): Promise<WorkflowNode[]> {
+  if (nodeIds.length === 0) return [];
+  const uid = resolveUserId(userId);
+  const kv = await getKv();
+  const results: WorkflowNode[] = [];
+
+  for (let i = 0; i < nodeIds.length; i += 10) {
+    const chunk = nodeIds.slice(i, i + 10);
+    const keys = chunk.map((id) => ["users", uid, "nodes", workflowId, id]);
+    const entries = await kv.getMany<WorkflowNode[]>(keys);
+    for (const entry of entries) {
+      if (entry.value) {
+        results.push(entry.value);
+      }
+    }
+  }
+
+  return results;
+}
+
 export function listNodes(
   workflowId: WorkflowId,
   options?: ListOptions,
@@ -87,6 +112,55 @@ export async function deleteNode(
     }
   }
   await atomic.commit();
+}
+
+/** Deletes multiple nodes by their IDs in bulk using atomic batches. */
+export async function deleteNodes(
+  workflowId: WorkflowId,
+  nodeIds: string[],
+  userId?: string,
+): Promise<void> {
+  if (nodeIds.length === 0) return;
+  const uid = resolveUserId(userId);
+  const existingNodes = await getNodes(workflowId, nodeIds, uid);
+  const kv = await getKv();
+  let atomic = kv.atomic();
+  let opCount = 0;
+
+  for (const node of existingNodes) {
+    atomic.delete(["users", uid, "nodes", workflowId, node.id]);
+    opCount++;
+    if (node.type === "subworkflow" && typeof node.config?.childWorkflowId === "string") {
+      const childId = (node.config.childWorkflowId as string).trim();
+      if (childId) {
+        atomic.delete(["users", uid, "subworkflow_refs", childId, workflowId, node.id]);
+        opCount++;
+      }
+    }
+    if (opCount >= MAX_ATOMIC_OPS) {
+      await atomic.commit();
+      atomic = kv.atomic();
+      opCount = 0;
+    }
+  }
+
+  // Also ensure any IDs not found in existingNodes are deleted
+  const existingIdSet = new Set(existingNodes.map((n) => n.id));
+  for (const id of nodeIds) {
+    if (!existingIdSet.has(id)) {
+      atomic.delete(["users", uid, "nodes", workflowId, id]);
+      opCount++;
+      if (opCount >= MAX_ATOMIC_OPS) {
+        await atomic.commit();
+        atomic = kv.atomic();
+        opCount = 0;
+      }
+    }
+  }
+
+  if (opCount > 0) {
+    await atomic.commit();
+  }
 }
 
 /** Finds all workflow IDs that are referenced as child workflows in any subworkflow node via index. */

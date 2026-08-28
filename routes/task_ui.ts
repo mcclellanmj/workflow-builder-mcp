@@ -920,13 +920,19 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       <span class="brand-title">Workflow MCP</span>
     </a>
     <div class="header-nav">
-      <button class="nav-tab ${initialTab === 'tasks' ? 'active' : ''}" id="tab-btn-tasks" onclick="switchMainTab('tasks')">
+      <button class="nav-tab ${
+    initialTab === "tasks" ? "active" : ""
+  }" id="tab-btn-tasks" onclick="switchMainTab('tasks')">
         📋 Tasks
       </button>
-      <button class="nav-tab ${initialTab === 'memories' ? 'active' : ''}" id="tab-btn-memories" onclick="switchMainTab('memories')">
+      <button class="nav-tab ${
+    initialTab === "memories" ? "active" : ""
+  }" id="tab-btn-memories" onclick="switchMainTab('memories')">
         🧠 Memories
       </button>
-      <button class="nav-tab ${initialTab === 'journals' ? 'active' : ''}" id="tab-btn-journals" onclick="switchMainTab('journals')">
+      <button class="nav-tab ${
+    initialTab === "journals" ? "active" : ""
+  }" id="tab-btn-journals" onclick="switchMainTab('journals')">
         📖 Role Journals
       </button>
       <a href="/visualize" class="nav-link">📊 Workflows</a>
@@ -938,7 +944,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
   </header>
 
   <!-- ======================== VIEW 1: TASKS KANBAN ======================== -->
-  <div id="tasksView" class="main-view ${initialTab !== 'tasks' ? 'hidden' : ''}">
+  <div id="tasksView" class="main-view ${initialTab !== "tasks" ? "hidden" : ""}">
     <!-- Controls & Metrics -->
     <div class="controls-bar">
       <div class="metrics-row">
@@ -1071,7 +1077,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
   </div>
 
   <!-- ======================== VIEW 2: MEMORY VAULT ======================== -->
-  <div id="memoriesView" class="main-view ${initialTab !== 'memories' ? 'hidden' : ''}">
+  <div id="memoriesView" class="main-view ${initialTab !== "memories" ? "hidden" : ""}">
     <!-- Controls & Metrics -->
     <div class="controls-bar">
       <div class="metrics-row">
@@ -1126,7 +1132,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
   </div>
 
   <!-- ======================== VIEW 3: ROLE JOURNALS ======================== -->
-  <div id="journalsView" class="main-view ${initialTab !== 'journals' ? 'hidden' : ''}">
+  <div id="journalsView" class="main-view ${initialTab !== "journals" ? "hidden" : ""}">
     <!-- Controls & Metrics -->
     <div class="controls-bar">
       <div class="metrics-row">
@@ -2705,4 +2711,3 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
 </body>
 </html>`;
 }
-

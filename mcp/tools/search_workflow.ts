@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { listNodes, listWorkflows } from "../../store/kv.ts";
+import { listEntries, listNodes, listWorkflows, resolveUserId } from "../../store/kv.ts";
 import type { NodeType, Workflow, WorkflowNode } from "../../store/types.ts";
 import { defineTool, requireWorkflow, richResponse, STATUS_ICONS } from "../helpers.ts";
 
@@ -172,6 +172,8 @@ export const searchWorkflowTool = defineTool({
   }) => {
     let targetWorkflows: Workflow[] = [];
     const scopeIdentifier = workflow ?? workflowId;
+    const uid = resolveUserId();
+    let nodesByWorkflow: Map<string, WorkflowNode[]> | null = null;
 
     if (scopeIdentifier) {
       const wfCheck = await requireWorkflow(scopeIdentifier);
@@ -179,6 +181,15 @@ export const searchWorkflowTool = defineTool({
       targetWorkflows = [wfCheck.workflow];
     } else {
       targetWorkflows = await listWorkflows();
+      const allNodes = await listEntries<WorkflowNode>(["users", uid, "nodes"]);
+      nodesByWorkflow = new Map<string, WorkflowNode[]>();
+      for (const node of allNodes) {
+        if (node && node.workflowId) {
+          const list = nodesByWorkflow.get(node.workflowId) ?? [];
+          list.push(node);
+          nodesByWorkflow.set(node.workflowId, list);
+        }
+      }
     }
 
     const matches: SearchMatchItem[] = [];
@@ -221,7 +232,9 @@ export const searchWorkflowTool = defineTool({
       }
 
       // 2. Search nodes in this workflow
-      const nodes: WorkflowNode[] = await listNodes(wf.id);
+      const nodes: WorkflowNode[] = nodesByWorkflow
+        ? (nodesByWorkflow.get(wf.id) ?? [])
+        : (await listNodes(wf.id));
 
       for (const node of nodes) {
         if (matches.length >= limit) break;
