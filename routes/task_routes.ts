@@ -13,7 +13,7 @@ import {
   getDependencies,
   getTask,
   getTaskComments,
-  listTasks,
+  listTasks, listClosedTasks,
   updateTask,
 } from "../store/kv.ts";
 import type { TaskPriority, TaskStatus, TaskType } from "../store/types.ts";
@@ -100,7 +100,31 @@ export async function handleTaskRoutes(
       tasks,
     });
   }
+  // 5. GET /api/tasks/closed - List closed tasks (optional endpoint)
+  if (path === "/api/tasks/closed" && method === "GET") {
+    const status = "closed"; // implicit filter
+    const role = url.searchParams.get("role") || undefined;
+    const assignee = url.searchParams.get("assignee") || undefined;
+    const type = url.searchParams.get("type") as TaskType | null;
+    const workflowId = url.searchParams.get("workflowId") || undefined;
+    const parentTaskId = url.searchParams.get("parentTaskId") || undefined;
+    const limit = url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined;
 
+    const tasks = await listClosedTasks({
+      status: status as any,
+      role,
+      assignee,
+      type: type || undefined,
+      workflowId,
+      parentTaskId,
+      limit,
+      userId,
+    });
+    return jsonResponse({
+      count: tasks.length,
+      tasks,
+    });
+  }
   // 4. POST /api/tasks - Create task
   if (path === "/api/tasks" && method === "POST") {
     try {

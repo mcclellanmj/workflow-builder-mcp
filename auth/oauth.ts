@@ -14,6 +14,10 @@ import {
 } from "@deno/kv-oauth";
 import { safeGetEnv } from "../env.ts";
 import { getKv } from "../store/kv.ts";
+import { TtlCache } from "../store/cache.ts";
+
+export const apiTokenCache = new TtlCache<string, ApiTokenInfo>({ defaultTtlMs: 300_000 });
+export const sessionCache = new TtlCache<string, UserSession>({ defaultTtlMs: 300_000 });
 
 export interface UserSession {
   userId: string;
@@ -162,6 +166,8 @@ export async function handleCallback(req: Request): Promise<Response> {
     .set(["users", userId, "profile"], userSession)
     .commit();
 
+  sessionCache.set(sessionId, userSession);
+
   return response;
 }
 
@@ -189,6 +195,8 @@ export async function createSession(
     .set(["users", userId, "profile"], session)
     .commit();
 
+  sessionCache.set(sessionId, session);
+
   const isSecure = safeGetEnv("DENO_ENV") === "production" ||
     safeGetEnv("NODE_ENV") === "production" ||
     Boolean(safeGetEnv("DENO_DEPLOYMENT_ID")) ||
@@ -204,8 +212,18 @@ export async function createSession(
  * Signs the user out by clearing the session cookie and KV record.
  */
 export async function signOut(req: Request): Promise<Response> {
-  const sessionId = await getSessionId(req);
+  let sessionId = await getSessionId(req);
+  if (!sessionId) {
+    const cookieStr = req.headers.get("cookie") || req.headers.get("Cookie");
+    if (cookieStr) {
+      const match = cookieStr.match(/(?:^|;\s*)site-session=([^;]+)/);
+      if (match) {
+        sessionId = decodeURIComponent(match[1]);
+      }
+    }
+  }
   if (sessionId) {
+    sessionCache.delete(sessionId);
     const kv = await getKv();
     await kv.delete(["sessions", sessionId]);
   }
@@ -250,6 +268,8 @@ export async function createApiToken(
     .set(["user_api_tokens", userId, id], tokenInfo)
     .commit();
 
+  apiTokenCache.set(token, tokenInfo);
+
   return tokenInfo;
 }
 
@@ -258,6 +278,16 @@ export async function createApiToken(
  */
 export async function validateApiToken(token: string): Promise<ApiTokenInfo | null> {
   if (!token || !token.startsWith("wf_")) return null;
+
+  const cached = apiTokenCache.get(token);
+  if (cached) {
+    if (cached.expiresAt && new Date(cached.expiresAt).getTime() < Date.now()) {
+      apiTokenCache.delete(token);
+      return null;
+    }
+    return cached;
+  }
+
   const kv = await getKv();
   const entry = await kv.get<ApiTokenInfo>(["api_tokens", token]);
   if (!entry.value) return null;
@@ -267,6 +297,8 @@ export async function validateApiToken(token: string): Promise<ApiTokenInfo | nu
     // Token expired
     return null;
   }
+
+  apiTokenCache.set(token, info);
   return info;
 }
 
@@ -292,13 +324,20 @@ export async function revokeApiToken(userId: string, tokenId: string): Promise<b
   const userTokenEntry = await kv.get<ApiTokenInfo>(["user_api_tokens", userId, tokenId]);
   if (!userTokenEntry.value) return false;
 
+  const tokenString = userTokenEntry.value.token;
+  if (tokenString) {
+    apiTokenCache.delete(tokenString);
+  }
+
   await kv.atomic()
     .delete(["user_api_tokens", userId, tokenId])
-    .delete(["api_tokens", userTokenEntry.value.token])
+    .delete(["api_tokens", tokenString])
     .commit();
 
   return true;
 }
+
+export const deleteApiToken = revokeApiToken;
 
 /**
  * Authenticates an incoming HTTP Request via:
@@ -335,11 +374,18 @@ export async function authenticateRequest(req: Request): Promise<AuthResult | nu
       }
     }
     if (sessionId) {
-      const sessionEntry = await kv.get<UserSession>(["sessions", sessionId]);
-      if (sessionEntry.value) {
+      let session = sessionCache.get(sessionId);
+      if (!session) {
+        const sessionEntry = await kv.get<UserSession>(["sessions", sessionId]);
+        if (sessionEntry.value) {
+          session = sessionEntry.value;
+          sessionCache.set(sessionId, session);
+        }
+      }
+      if (session) {
         return {
-          userId: sessionEntry.value.userId,
-          user: sessionEntry.value,
+          userId: session.userId,
+          user: session,
           authMethod: "session",
         };
       }

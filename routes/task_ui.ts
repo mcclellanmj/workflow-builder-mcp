@@ -664,10 +664,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
         <span style="color: #ef4444;">🛑 Blocked:</span>
         <span class="metric-num" id="statBlocked" style="color: #ef4444;">0</span>
       </div>
-      <div class="metric-pill">
-        <span style="color: #94a3b8;">✅ Closed:</span>
-        <span class="metric-num" id="statClosed" style="color: #94a3b8;">0</span>
-      </div>
+      <!-- Closed metric removed to reduce read overhead -->
     </div>
 
     <div class="filters-row">
@@ -1089,7 +1086,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       document.getElementById("statReady").textContent = readyTaskIds.size;
       document.getElementById("statInProgress").textContent = allTasks.filter(t => t.status === "in_progress" || t.status === "claimed").length;
       document.getElementById("statBlocked").textContent = allTasks.filter(t => t.status === "blocked").length;
-      document.getElementById("statClosed").textContent = allTasks.filter(t => t.status === "closed" || t.status === "wontfix").length;
+      // statClosed metric removed; no DOM update needed
 
       filtered.forEach(task => {
         let laneKey = task.status || "open";

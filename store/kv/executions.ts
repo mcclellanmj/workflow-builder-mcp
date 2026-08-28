@@ -3,7 +3,7 @@
  */
 
 import type { ExecutionId, WorkflowExecution, WorkflowId } from "../types.ts";
-import { getKv, resolveUserId } from "./client.ts";
+import { getKv, MAX_GET_MANY_KEYS, resolveUserId } from "./client.ts";
 
 /** Saves a workflow execution (both the main record and the by-workflow index entry). */
 export async function saveExecution(
@@ -53,9 +53,9 @@ export async function listExecutions(
         ids.push(entry.value);
       }
     }
-    // Batch lookup using getMany in chunks of 128 keys
-    for (let i = 0; i < ids.length; i += 128) {
-      const chunk = ids.slice(i, i + 128);
+    // Batch lookup using getMany in chunks of MAX_GET_MANY_KEYS
+    for (let i = 0; i < ids.length; i += MAX_GET_MANY_KEYS) {
+      const chunk = ids.slice(i, i + MAX_GET_MANY_KEYS);
       const keys = chunk.map((id) => ["users", uid, "executions", id]);
       const entries = await kv.getMany<WorkflowExecution[]>(keys);
       for (const entry of entries) {

@@ -376,6 +376,8 @@ export interface Memory {
   // Metadata
   source?: string;
   tags?: string[];
+  lastAccessed?: string;
+  accessCount?: number;
 
   createdAt: string;
   updatedAt: string;

@@ -1,7 +1,17 @@
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { getOAuthClient, registerOAuthClient, verifyCodeChallenge } from "./oauth_server.ts";
 import { handleHttpRequest } from "../http_server.ts";
-import { createSession } from "./oauth.ts";
+import {
+  apiTokenCache,
+  authenticateRequest,
+  createApiToken,
+  createSession,
+  deleteApiToken,
+  revokeApiToken,
+  sessionCache,
+  signOut,
+  validateApiToken,
+} from "./oauth.ts";
 
 Deno.test("OAuth Server - PKCE Challenge Verification (S256 Mandatory)", async () => {
   const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
@@ -322,4 +332,105 @@ Deno.test("OAuth Server - Unauthenticated MCP Request Returns WWW-Authenticate C
     wwwAuth,
     'resource_metadata="http://localhost:8000/.well-known/oauth-protected-resource"',
   );
+});
+
+Deno.test("OAuth & Auth Cache - API Token caching, validation, and invalidation", async () => {
+  apiTokenCache.clear();
+  const userId = "test_user_cache_" + crypto.randomUUID().slice(0, 8);
+
+  // 1. Create API token -> should be populated in apiTokenCache
+  const tokenInfo = await createApiToken(userId, "Cache Test Token");
+  assertExists(tokenInfo.token);
+  assertEquals(apiTokenCache.get(tokenInfo.token)?.id, tokenInfo.id);
+
+  // 2. Validate token (cache hit)
+  const validatedCached = await validateApiToken(tokenInfo.token);
+  assertExists(validatedCached);
+  assertEquals(validatedCached.userId, userId);
+
+  // 3. Clear cache and validate (cache miss -> KV lookup -> re-caches)
+  apiTokenCache.clear();
+  assertEquals(apiTokenCache.get(tokenInfo.token), undefined);
+
+  const validatedFromKv = await validateApiToken(tokenInfo.token);
+  assertExists(validatedFromKv);
+  assertEquals(validatedFromKv.userId, userId);
+  assertEquals(apiTokenCache.get(tokenInfo.token)?.id, tokenInfo.id);
+
+  // 4. Revoke token via revokeApiToken / deleteApiToken -> invalidates cache
+  const revoked = await revokeApiToken(userId, tokenInfo.id);
+  assertEquals(revoked, true);
+  assertEquals(apiTokenCache.get(tokenInfo.token), undefined);
+
+  const validatedAfterRevoke = await validateApiToken(tokenInfo.token);
+  assertEquals(validatedAfterRevoke, null);
+});
+
+Deno.test("OAuth & Auth Cache - User Session caching, authentication, and signout", async () => {
+  sessionCache.clear();
+  const userId = "test_user_sess_" + crypto.randomUUID().slice(0, 8);
+
+  // 1. Create session -> populated in sessionCache
+  const { sessionId, cookieHeader } = await createSession(userId, "Session Tester");
+  assertExists(sessionId);
+  assertExists(cookieHeader);
+  assertEquals(sessionCache.get(sessionId)?.userId, userId);
+
+  // 2. Authenticate request via session cookie (cache hit)
+  const req1 = new Request("http://localhost:8000/api/profile", {
+    headers: {
+      cookie: `site-session=${sessionId}`,
+    },
+  });
+  const authRes1 = await authenticateRequest(req1);
+  assertExists(authRes1);
+  assertEquals(authRes1.userId, userId);
+  assertEquals(authRes1.authMethod, "session");
+
+  // 3. Clear session cache -> Authenticate request (cache miss -> KV lookup -> re-caches)
+  sessionCache.clear();
+  assertEquals(sessionCache.get(sessionId), undefined);
+
+  const authRes2 = await authenticateRequest(req1);
+  assertExists(authRes2);
+  assertEquals(authRes2.userId, userId);
+  assertEquals(sessionCache.get(sessionId)?.userId, userId);
+
+  // 4. Sign out -> deletes from sessionCache and KV
+  const signoutReq = new Request("http://localhost:8000/oauth/signout", {
+    headers: {
+      cookie: `site-session=${sessionId}`,
+    },
+  });
+  await signOut(signoutReq);
+  assertEquals(sessionCache.get(sessionId), undefined);
+
+  // Subsequent request should fail
+  const authRes3 = await authenticateRequest(req1);
+  assertEquals(authRes3, null);
+});
+
+Deno.test("OAuth & Auth Cache - Bearer Request authentication with cached API token", async () => {
+  apiTokenCache.clear();
+  const userId = "test_user_bearer_" + crypto.randomUUID().slice(0, 8);
+  const tokenInfo = await createApiToken(userId, "Bearer Test Token");
+
+  const req = new Request("http://localhost:8000/mcp", {
+    headers: {
+      Authorization: `Bearer ${tokenInfo.token}`,
+    },
+  });
+
+  const authRes = await authenticateRequest(req);
+  assertExists(authRes);
+  assertEquals(authRes.userId, userId);
+  assertEquals(authRes.authMethod, "bearer");
+  assertEquals(apiTokenCache.get(tokenInfo.token)?.id, tokenInfo.id);
+
+  // Invalidate via deleteApiToken alias
+  await deleteApiToken(userId, tokenInfo.id);
+  assertEquals(apiTokenCache.get(tokenInfo.token), undefined);
+
+  const authResAfterRevoke = await authenticateRequest(req);
+  assertEquals(authResAfterRevoke, null);
 });

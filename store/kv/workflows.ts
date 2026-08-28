@@ -4,12 +4,14 @@
 
 import type { Workflow, WorkflowId, WorkflowNode } from "../types.ts";
 import { getKv, listEntries, type ListOptions, MAX_ATOMIC_OPS, resolveUserId } from "./client.ts";
+import { invalidateWorkflowCache } from "../../mcp/resolvers.ts";
 
 export async function saveWorkflow(workflow: Workflow, userId?: string): Promise<void> {
   const uid = resolveUserId(userId || workflow.userId);
   workflow.userId = uid;
   const kv = await getKv();
   await kv.set(["users", uid, "workflows", workflow.id], workflow);
+  invalidateWorkflowCache(uid);
 }
 
 export async function getWorkflow(id: WorkflowId, userId?: string): Promise<Workflow | null> {
@@ -82,4 +84,5 @@ export async function deleteWorkflow(id: WorkflowId, userId?: string): Promise<v
   atomic.delete(["users", uid, "workflows", id]);
   opCount++;
   await commitBatch();
+  invalidateWorkflowCache(uid);
 }

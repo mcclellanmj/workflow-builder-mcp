@@ -11,7 +11,7 @@ import type {
   TaskId,
   WorkflowId,
 } from "../types.ts";
-import { getKv, MAX_ATOMIC_OPS, resolveUserId } from "./client.ts";
+import { getKv, MAX_ATOMIC_OPS, MAX_GET_MANY_KEYS, resolveUserId } from "./client.ts";
 
 /** Input payload for saving or updating a memory. */
 export interface SaveMemoryInput {
@@ -142,6 +142,8 @@ export async function saveMemory(
         content: input.content,
         source: input.source !== undefined ? input.source : existingEntry.value.source,
         tags: input.tags !== undefined ? input.tags : existingEntry.value.tags,
+        accessCount: existingEntry.value.accessCount,
+        lastAccessed: existingEntry.value.lastAccessed,
         updatedAt: now,
       };
 
@@ -164,6 +166,7 @@ export async function saveMemory(
     roleId: input.roleId,
     source: input.source,
     tags: input.tags,
+    accessCount: 0,
     createdAt: now,
     updatedAt: now,
   };
@@ -200,7 +203,7 @@ export async function getMemory(memoryId: string, userId?: string): Promise<Memo
 
 /**
  * Lists memories matching the given filters. Returns summaries only (no content),
- * enriched with the lastAccessed timestamp and access count from the access log.
+ * enriched with the lastAccessed timestamp and access count from the memory document.
  */
 export async function listMemories(
   filters?: MemoryFilters,
@@ -249,8 +252,8 @@ export async function listMemories(
 
   const memories: Memory[] = [];
   if (candidateIds !== null) {
-    for (let i = 0; i < candidateIds.length; i += 128) {
-      const chunk = candidateIds.slice(i, i + 128);
+    for (let i = 0; i < candidateIds.length; i += MAX_GET_MANY_KEYS) {
+      const chunk = candidateIds.slice(i, i + MAX_GET_MANY_KEYS);
       const keys = chunk.map((id) => ["users", uid, "memories", id]);
       const entries = await kv.getMany<Memory[]>(keys);
       for (const entry of entries) {
@@ -283,46 +286,26 @@ export async function listMemories(
     filtered = filtered.slice(0, filters.limit);
   }
 
-  // Enrich summaries with access log info
-  const summaries: MemorySummary[] = [];
-  for (const m of filtered) {
-    let lastAccessed: string | undefined = undefined;
-    let accessCount = 0;
-
-    for await (
-      const entry of kv.list<MemoryAccessRecord>({
-        prefix: ["users", uid, "memory_access_log", m.id],
-      })
-    ) {
-      accessCount++;
-      if (!lastAccessed || (entry.value?.accessedAt && entry.value.accessedAt > lastAccessed)) {
-        lastAccessed = entry.value?.accessedAt;
-      }
-    }
-
-    summaries.push({
-      id: m.id,
-      key: m.key,
-      summary: m.summary,
-      scope: m.scope,
-      workflowId: m.workflowId,
-      nodeId: m.nodeId,
-      roleId: m.roleId,
-      source: m.source,
-      tags: m.tags,
-      lastAccessed,
-      accessCount,
-      createdAt: m.createdAt,
-      updatedAt: m.updatedAt,
-    });
-  }
-
-  return summaries;
+  return filtered.map((m) => ({
+    id: m.id,
+    key: m.key,
+    summary: m.summary,
+    scope: m.scope,
+    workflowId: m.workflowId,
+    nodeId: m.nodeId,
+    roleId: m.roleId,
+    source: m.source,
+    tags: m.tags,
+    lastAccessed: m.lastAccessed,
+    accessCount: m.accessCount ?? 0,
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+  }));
 }
 
 /**
  * Recalls a memory by key or ID. Returns full memory content and writes a
- * MemoryAccessRecord to the access log.
+ * MemoryAccessRecord to the access log while atomically updating denormalized access stats.
  */
 export async function recallMemory(
   params: RecallMemoryParams,
@@ -374,21 +357,35 @@ export async function recallMemory(
     return null;
   }
 
-  // Record access in memory_access_log
+  // Record access in memory_access_log and atomically update memory document
   const accessId = crypto.randomUUID();
+  const accessedAt = new Date().toISOString();
   const accessRecord: MemoryAccessRecord = {
     id: accessId,
     memoryId: memory.id,
     memoryKey: memory.key,
-    accessedAt: new Date().toISOString(),
+    accessedAt,
     accessedBy: params.accessedBy,
     executionId: params.executionId,
     taskId: params.taskId,
   };
 
-  await kv.set(["users", uid, "memory_access_log", memory.id, accessId], accessRecord);
+  const updatedMemory: Memory = {
+    ...memory,
+    accessCount: (memory.accessCount || 0) + 1,
+    lastAccessed: accessedAt,
+  };
 
-  return memory;
+  const atomicRes = await kv.atomic()
+    .set(["users", uid, "memory_access_log", memory.id, accessId], accessRecord)
+    .set(["users", uid, "memories", memory.id], updatedMemory)
+    .commit();
+
+  if (!atomicRes.ok) {
+    throw new Error(`Failed to update memory access record for memory "${memory.id}"`);
+  }
+
+  return updatedMemory;
 }
 
 /**
@@ -451,7 +448,7 @@ export async function deleteMemory(
   ) {
     accessLogKeys.push(entry.key);
   }
-  const accessCount = accessLogKeys.length;
+  const accessCount = memory.accessCount ?? accessLogKeys.length;
 
   let atomic = kv.atomic();
   let opCount = 0;

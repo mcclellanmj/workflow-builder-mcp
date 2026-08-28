@@ -3,9 +3,26 @@
  * Allows tools to accept UUIDs, exact names, kebab-case slugs, or parent/child paths.
  */
 
-import { getWorkflow, listEdges, listNodes, listWorkflows } from "../store/kv.ts";
+import { resolveUserId } from "../store/kv/client.ts";
+import { getWorkflow, listWorkflows } from "../store/kv/workflows.ts";
+import { listNodes } from "../store/kv/nodes.ts";
+import { listEdges } from "../store/kv/edges.ts";
+import { TtlCache } from "../store/cache.ts";
 import type { Workflow, WorkflowEdge, WorkflowNode } from "../store/types.ts";
 import { createErrorResponse, type ToolCallResponse } from "./registry.ts";
+
+const workflowListCache = new TtlCache<string, Workflow[]>({ defaultTtlMs: 300_000 });
+
+/**
+ * Invalidates cached workflow lists for a user or globally.
+ */
+export function invalidateWorkflowCache(userId?: string): void {
+  if (userId) {
+    workflowListCache.delete(resolveUserId(userId));
+  } else {
+    workflowListCache.clear();
+  }
+}
 
 /**
  * Converts any text into a normalized kebab-case slug.
@@ -31,11 +48,17 @@ export async function resolveWorkflow(
   const trimmed = identifier.trim();
   if (!trimmed) return null;
 
+  const uid = resolveUserId(userId);
+
   // 1. Direct KV lookup by exact ID
   const direct = await getWorkflow(trimmed, userId);
   if (direct) return direct;
 
-  const allWorkflows = await listWorkflows({ userId });
+  let allWorkflows = workflowListCache.get(uid);
+  if (!allWorkflows) {
+    allWorkflows = await listWorkflows({ userId });
+    workflowListCache.set(uid, allWorkflows);
+  }
   if (allWorkflows.length === 0) return null;
 
   // 2. Direct ID match in cached list

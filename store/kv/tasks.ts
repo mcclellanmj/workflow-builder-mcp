@@ -15,7 +15,7 @@ import type {
   TaskType,
   WorkflowId,
 } from "../types.ts";
-import { getKv, MAX_ATOMIC_OPS, resolveUserId } from "./client.ts";
+import { getKv, MAX_ATOMIC_OPS, MAX_GET_MANY_KEYS, resolveUserId } from "./client.ts";
 import { ensureRole } from "./roles.ts";
 
 /** Input payload for creating a new task. */
@@ -168,12 +168,20 @@ export async function createTask(
 export async function getTask(taskId: TaskId, userId?: string): Promise<Task | null> {
   const uid = resolveUserId(userId);
   const kv = await getKv();
+
+  // Try active tasks namespace first
   const entry = await kv.get<Task>(["users", uid, "tasks", taskId]);
-  if (!entry.value) return null;
-  return {
-    ...entry.value,
-    comments: entry.value.comments ?? [],
-  };
+  if (entry.value) {
+    return { ...entry.value, comments: entry.value.comments ?? [] };
+  }
+
+  // Fallback to closed tasks namespace
+  const closedEntry = await kv.get<Task>(["users", uid, "closedTasks", taskId]);
+  if (closedEntry.value) {
+    return { ...closedEntry.value, comments: closedEntry.value.comments ?? [] };
+  }
+
+  return null;
 }
 
 /**
@@ -285,8 +293,8 @@ export async function listTasks(
 /** Helper to fetch multiple tasks by IDs using getMany chunks. */
 async function fetchTasksByIds(kv: Deno.Kv, uid: string, ids: string[]): Promise<Task[]> {
   const results: Task[] = [];
-  for (let i = 0; i < ids.length; i += 128) {
-    const chunk = ids.slice(i, i + 128);
+  for (let i = 0; i < ids.length; i += MAX_GET_MANY_KEYS) {
+    const chunk = ids.slice(i, i + MAX_GET_MANY_KEYS);
     const keys = chunk.map((id) => ["users", uid, "tasks", id]);
     const entries = await kv.getMany<Task[]>(keys);
     for (const entry of entries) {
@@ -300,6 +308,89 @@ async function fetchTasksByIds(kv: Deno.Kv, uid: string, ids: string[]): Promise
   }
   return results;
 }
+export async function moveTaskToClosed(uid: string, task: Task): Promise<void> {
+  const kv = await getKv();
+  // Atomic: set closed entry, delete active entry, remove secondary indexes
+  let atomic = kv.atomic()
+    .set(["users", uid, "closedTasks", task.id], task)
+    .delete(["users", uid, "tasks", task.id]);
+  // Remove secondary indexes (only for active namespace)
+  if (task.type) atomic = atomic.delete(["users", uid, "tasks_by_type", task.type, task.id]);
+  if (task.workflowId) atomic = atomic.delete(["users", uid, "tasks_by_workflow", task.workflowId, task.id]);
+  if (task.executionId) atomic = atomic.delete(["users", uid, "tasks_by_execution", task.executionId, task.id]);
+  if (task.parentTaskId) atomic = atomic.delete(["users", uid, "tasks_by_parent", task.parentTaskId, task.id]);
+  if (task.assignee) atomic = atomic.delete(["users", uid, "tasks_by_assignee", task.assignee, task.id]);
+  const res = await atomic.commit();
+  if (!res.ok) {
+    throw new Error(`Failed to move task ${task.id} to closed namespace`);
+  }
+}
+
+export async function moveTaskToActive(uid: string, task: Task): Promise<void> {
+  const kv = await getKv();
+  // Atomic: set active entry, delete closed entry, add secondary indexes
+  let atomic = kv.atomic()
+    .set(["users", uid, "tasks", task.id], task)
+    .delete(["users", uid, "closedTasks", task.id]);
+  // Recreate secondary indexes
+  if (task.type) atomic = atomic.set(["users", uid, "tasks_by_type", task.type, task.id], task.id);
+  if (task.workflowId) atomic = atomic.set(["users", uid, "tasks_by_workflow", task.workflowId, task.id], task.id);
+  if (task.executionId) atomic = atomic.set(["users", uid, "tasks_by_execution", task.executionId, task.id], task.id);
+  if (task.parentTaskId) atomic = atomic.set(["users", uid, "tasks_by_parent", task.parentTaskId, task.id], task.id);
+  if (task.assignee) atomic = atomic.set(["users", uid, "tasks_by_assignee", task.assignee, task.id], task.id);
+  const res = await atomic.commit();
+  if (!res.ok) {
+    throw new Error(`Failed to move task ${task.id} to active namespace`);
+  }
+}
+export async function listClosedTasks(
+  filters?: TaskFilters,
+  options?: { userId?: string },
+): Promise<Task[]> {
+  const uid = resolveUserId(filters?.userId || options?.userId);
+  const kv = await getKv();
+
+  let candidateTasks: Task[] = [];
+  // Iterate over closedTasks namespace (no secondary indexes)
+  for await (const entry of kv.list<Task>({ prefix: ["users", uid, "closedTasks"] })) {
+    if (entry.value && typeof entry.value === "object") {
+      candidateTasks.push({
+        ...entry.value,
+        comments: entry.value.comments ?? [],
+      });
+    }
+  }
+
+  // In-memory filter similar to listTasks
+  let filtered = candidateTasks.filter((t) => {
+    if (filters?.workflowId && t.workflowId !== filters.workflowId) return false;
+    if (filters?.executionId && t.executionId !== filters.executionId) return false;
+    if (filters?.nodeId && t.nodeId !== filters.nodeId) return false;
+    if (filters?.assignee && t.assignee !== filters.assignee) return false;
+    if (filters?.role && t.role !== filters.role) return false;
+    if (filters?.parentTaskId && t.parentTaskId !== filters.parentTaskId) return false;
+    if (filters?.type) {
+      if (Array.isArray(filters.type)) {
+        if (!t.type || !filters.type.includes(t.type)) return false;
+      } else {
+        if (t.type !== filters.type) return false;
+      }
+    }
+    if (filters?.status) {
+      if (Array.isArray(filters.status)) {
+        if (!filters.status.includes(t.status)) return false;
+      } else {
+        if (t.status !== filters.status) return false;
+      }
+    }
+    return true;
+  });
+
+  if (filters?.limit && filters.limit > 0) {
+    filtered = filtered.slice(0, filters.limit);
+  }
+  return filtered;
+}
 
 /**
  * Updates an existing task and synchronizes secondary indexes.
@@ -311,8 +402,13 @@ export async function updateTask(
 ): Promise<Task> {
   const uid = resolveUserId(userId);
   const kv = await getKv();
-
-  const entry = await kv.get<Task>(["users", uid, "tasks", taskId]);
+  // Determine current namespace (active or closed)
+  let entry = await kv.get<Task>(["users", uid, "tasks", taskId]);
+  let namespace = "tasks";
+  if (!entry.value) {
+    entry = await kv.get<Task>(["users", uid, "closedTasks", taskId]);
+    namespace = "closedTasks";
+  }
   if (!entry.value) {
     throw new Error(`Task not found: ${taskId}`);
   }
@@ -331,7 +427,7 @@ export async function updateTask(
     updatedAt: now,
   };
 
-  const atomic = kv.atomic().check(entry).set(["users", uid, "tasks", taskId], updated);
+  const atomic = kv.atomic().check(entry).set(["users", uid, namespace, taskId], updated);
 
   // Synchronize secondary indexes on change
   if (existing.workflowId !== updated.workflowId) {
@@ -417,34 +513,39 @@ export async function deleteTask(taskId: TaskId, userId?: string): Promise<void>
     }
   };
 
-  // 1. Delete main task entry
-  atomic.delete(["users", uid, "tasks", taskId]);
+  // Determine namespace based on task status (closed or active)
+  const namespace = task.status === "closed" || task.status === "wontfix" ? "closedTasks" : "tasks";
+
+  // 1. Delete main task entry from the appropriate namespace
+  atomic.delete(["users", uid, namespace, taskId]);
   opCount++;
 
-  // 2. Delete secondary indexes
-  if (task.type) {
-    atomic.delete(["users", uid, "tasks_by_type", task.type, taskId]);
-    opCount++;
-  }
-  if (task.workflowId) {
-    atomic.delete(["users", uid, "tasks_by_workflow", task.workflowId, taskId]);
-    opCount++;
-  }
-  if (task.executionId) {
-    atomic.delete(["users", uid, "tasks_by_execution", task.executionId, taskId]);
-    opCount++;
-  }
-  if (task.parentTaskId) {
-    atomic.delete(["users", uid, "tasks_by_parent", task.parentTaskId, taskId]);
-    opCount++;
-  }
-  if (task.assignee) {
-    atomic.delete(["users", uid, "tasks_by_assignee", task.assignee, taskId]);
-    opCount++;
-  }
-  if (task.role) {
-    atomic.delete(["users", uid, "tasks_by_role", task.role, taskId]);
-    opCount++;
+  // 2. Delete secondary indexes only for active tasks namespace
+  if (namespace === "tasks") {
+    if (task.type) {
+      atomic.delete(["users", uid, "tasks_by_type", task.type, taskId]);
+      opCount++;
+    }
+    if (task.workflowId) {
+      atomic.delete(["users", uid, "tasks_by_workflow", task.workflowId, taskId]);
+      opCount++;
+    }
+    if (task.executionId) {
+      atomic.delete(["users", uid, "tasks_by_execution", task.executionId, taskId]);
+      opCount++;
+    }
+    if (task.parentTaskId) {
+      atomic.delete(["users", uid, "tasks_by_parent", task.parentTaskId, taskId]);
+      opCount++;
+    }
+    if (task.assignee) {
+      atomic.delete(["users", uid, "tasks_by_assignee", task.assignee, taskId]);
+      opCount++;
+    }
+    if (task.role) {
+      atomic.delete(["users", uid, "tasks_by_role", task.role, taskId]);
+      opCount++;
+    }
   }
 
   // 3. Delete outbound dependencies (tasks this task blocks or relates to)
@@ -647,15 +748,42 @@ export async function computeReadyFrontier(
     candidateTasks = candidateTasks.filter((t) => t.type && allowed.includes(t.type));
   }
 
+  // 2. Fetch inbound dependencies for all candidate tasks in parallel
+  const candidateDeps = await Promise.all(
+    candidateTasks.map((task) => getDependencies(task.id, "blocked-by", uid)),
+  );
+
+  // 3. Deduplicate all required blocker task IDs (dep.fromTaskId) across all candidates
+  const blockerIdsSet = new Set<TaskId>();
+  for (const deps of candidateDeps) {
+    for (const dep of deps) {
+      if (dep.type === "blocks" || dep.type === "waits-for") {
+        blockerIdsSet.add(dep.fromTaskId);
+      }
+    }
+  }
+
+  // 4. Batch fetch all blocker tasks using kv.getMany (via fetchTasksByIds) and construct map
+  const kv = await getKv();
+  const blockerTasks = blockerIdsSet.size > 0
+    ? await fetchTasksByIds(kv, uid, Array.from(blockerIdsSet))
+    : [];
+  const blockerMap = new Map<TaskId, Task>();
+  for (const task of blockerTasks) {
+    blockerMap.set(task.id, task);
+  }
+
+  // 5. Evaluate blocker status in-memory with zero extra KV round-trips
   const readyTasks: Task[] = [];
 
-  for (const task of candidateTasks) {
-    const inboundDeps = await getDependencies(task.id, "blocked-by", uid);
+  for (let i = 0; i < candidateTasks.length; i++) {
+    const task = candidateTasks[i];
+    const inboundDeps = candidateDeps[i];
     let isBlocked = false;
 
     for (const dep of inboundDeps) {
       if (dep.type === "blocks" || dep.type === "waits-for") {
-        const blocker = await getTask(dep.fromTaskId, uid);
+        const blocker = blockerMap.get(dep.fromTaskId);
         if (blocker && blocker.status !== "closed" && blocker.status !== "wontfix") {
           isBlocked = true;
           break;
@@ -771,15 +899,16 @@ export async function closeTask(
   }
 
   const now = new Date().toISOString();
-  const closedTask = await updateTask(
-    taskId,
-    {
-      status: "closed",
-      closedReason: reason,
-      closedAt: now,
-    },
-    uid,
-  );
+  const closedTaskData: Task = {
+    ...task,
+    status: "closed",
+    closedReason: reason,
+    closedAt: now,
+  };
+  // Move task to closed namespace with updated fields
+  await moveTaskToClosed(uid, closedTaskData);
+  const closedTask = closedTaskData;
+
 
   // Walk outbound dependencies to find affected tasks
   const outboundDeps = await getDependencies(taskId, "blocking", uid);

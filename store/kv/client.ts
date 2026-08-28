@@ -8,6 +8,7 @@ import { getCurrentUserId } from "../../auth/context.ts";
 let _kv: Deno.Kv | null = null;
 
 export const MAX_ATOMIC_OPS = 500;
+export const MAX_GET_MANY_KEYS = 10;
 
 /** Returns the shared Deno KV instance, opening it lazily on first call. */
 export async function getKv(): Promise<Deno.Kv> {
