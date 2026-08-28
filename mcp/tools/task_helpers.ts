@@ -78,8 +78,9 @@ export function formatTaskListMarkdown(
     const roleStr = t.role || "-";
     const assigneeStr = t.assignee || "-";
     const priorityStr = t.priority || "-";
+    const titleStr = t.type === "epic" ? `📦 **[Epic]** ${t.title}` : t.title;
     lines.push(
-      `| \`${t.id}\` | ${t.title} | \`${t.status}\` | ${roleStr} | ${assigneeStr} | ${priorityStr} |`,
+      `| \`${t.id}\` | ${titleStr} | \`${t.status}\` | ${roleStr} | ${assigneeStr} | ${priorityStr} |`,
     );
   }
 

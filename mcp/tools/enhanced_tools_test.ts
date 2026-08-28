@@ -6,8 +6,7 @@ import { editNodeTool } from "./edit_node.ts";
 import { getNodeTool } from "./get_node.ts";
 import { getWorkflowTool } from "./get_workflow.ts";
 import { connectNodesTool } from "./connect_nodes.ts";
-import { startWorkflowTool } from "./start_workflow.ts";
-import { getNextStepTool } from "./get_next_step.ts";
+import { workflowHydrateTool } from "./hydrate_workflow.ts";
 import { searchWorkflowTool } from "./search_workflow.ts";
 import { workflowPatchTool } from "./patch_workflow.ts";
 import { workflowTreeTool } from "./tree_workflow.ts";
@@ -42,6 +41,18 @@ Deno.test("Name and Slug Resolution - Eliminating UUID Lookup Overhead", async (
       description: "Check account takeover guardrails and passkey credentials",
     });
     assert(!step6Res.isError);
+
+    // Connect child workflow nodes: start -> Step 5-web -> Passkey Verification
+    await connectNodesTool.execute({
+      workflow: childWf.id,
+      fromNode: "Start",
+      toNode: "Step 5-web",
+    });
+    await connectNodesTool.execute({
+      workflow: childWf.id,
+      fromNode: "Step 5-web",
+      toNode: "Passkey Verification",
+    });
 
     // 2. Create Parent Workflow: "Review Workflow"
     const parentRes = await createWorkflowTool.execute({
@@ -109,23 +120,18 @@ Deno.test("Name and Slug Resolution - Eliminating UUID Lookup Overhead", async (
     assertEquals(getNodeData.name, "Step 5-web");
     assertEquals(getNodeData.runInSubAgent, true);
 
-    // 8. Test workflow_start using workflow slug: "review-workflow"
-    const startRes = await startWorkflowTool.execute({
+    // 8. Test workflow_hydrate using workflow slug: "review-workflow"
+    const hydrateRes = await workflowHydrateTool.execute({
       workflow: "review-workflow",
       format: "json",
     });
-    assert(!startRes.isError);
-    const startData = JSON.parse(startRes.content[0].text);
-    assert(startData.executionId);
-    assertEquals(startData.nextNodes[0].name, "security");
-
-    // 9. Test workflow_next using node slug: "security"
-    const nextRes = await getNextStepTool.execute({
-      executionId: startData.executionId,
-      node: "security",
-      status: "completed",
-    });
-    assert(!nextRes.isError);
+    assert(!hydrateRes.isError);
+    const hydrateData = JSON.parse(hydrateRes.content[0].text);
+    assertEquals(hydrateData.epic.workflowId, parentWf.id);
+    assertEquals(hydrateData.epics.length, 2); // Root Epic + child Epic
+    assertEquals(hydrateData.summary.totalEpics, 2);
+    assertEquals(hydrateData.summary.totalTasks, 2);
+    assert(hydrateData.readyTasks.length > 0);
 
     // 10. Test workflow_get with includeSubworkflows: true
     const getWithSubs = await getWorkflowTool.execute({

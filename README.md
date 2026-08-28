@@ -259,14 +259,22 @@ storage. Zero server deployment or network setup required.
 | `node_list`                    | List all nodes in a workflow.                                                       |
 | `node_connect`                 | Connect two nodes with an optional branch condition.                                |
 | `node_disconnect`              | Remove an edge between nodes.                                                       |
-| `workflow_start`               | Begin an execution run instance and return initial actionable steps.                |
-| `workflow_next`                | Complete a node and advance the execution run along outbound edges.                 |
-| `workflow_reset`               | Reset an execution run back to initial state.                                       |
+| `workflow_hydrate`             | Hydrate workflow template into an actionable Epic and Task DAG with ready frontier. |
 | `workflow_validate`            | Validate workflow DAG integrity, cycle rules, and heuristics.                       |
 | `workflow_visualize`           | Generate static Mermaid diagrams or export rich interactive HTML visualizers.       |
 | `workflow_extract_subworkflow` | Extract a chain of nodes into an independent child subworkflow.                     |
 | `workflow_export`              | Export a workflow graph as a portable JSON bundle.                                  |
 | `workflow_import`              | Import a workflow bundle with ID remapping/cloning, overwrite, and validation.      |
+| `task_ready`                   | Compute the claimable ready frontier of tasks with zero unresolved blockers.        |
+| `task_claim`                   | Atomically claim a ready task to prevent duplicate concurrent work.                 |
+| `task_close`                   | Complete a task and automatically unblock downstream tasks in the DAG.              |
+| `task_create`                  | Create assignable tasks or epics with roles, priorities, and parent-child nesting.  |
+| `task_list`                    | List tasks filtered by workflow, role, assignee, or status.                         |
+| `task_get`                     | Retrieve full task details, blocking dependencies, and child subtasks.              |
+| `task_update`                  | Update task details, status, or append progress notes.                              |
+| `task_depend`                  | Wire or remove dependency edges (`blocks`, `waits-for`, `conditional-blocks`).      |
+| `task_handoff`                 | Transfer task between agents preserving context and rejected approaches.            |
+| `context_prime`                | Bootstrap session with role journal, scoped memories, and ready frontier tasks.     |
 
 ---
 

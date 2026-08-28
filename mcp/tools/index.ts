@@ -13,9 +13,7 @@ import { getNodeTool } from "./get_node.ts";
 import { listNodesTool } from "./list_nodes.ts";
 import { connectNodesTool } from "./connect_nodes.ts";
 import { disconnectNodesTool } from "./disconnect_nodes.ts";
-import { startWorkflowTool } from "./start_workflow.ts";
-import { getNextStepTool } from "./get_next_step.ts";
-import { resetWorkflowTool } from "./reset_workflow.ts";
+import { workflowHydrateTool } from "./hydrate_workflow.ts";
 import { validateWorkflowTool } from "./validate_workflow.ts";
 import { visualizeWorkflowTool } from "./visualize_workflow.ts";
 import { extractSubworkflowTool } from "./extract_subworkflow.ts";
@@ -68,7 +66,6 @@ export {
   editNodeTool,
   exportWorkflowTool,
   extractSubworkflowTool,
-  getNextStepTool,
   getNodeTool,
   getTaskTool,
   getWorkflowTool,
@@ -83,16 +80,15 @@ export {
   memoryRecallTool,
   memorySaveTool,
   readyTasksTool,
-  resetWorkflowTool,
   roleCreateTool,
   roleListTool,
   searchWorkflowTool,
   searchWorkflowTool as workflowSearchTool,
-  startWorkflowTool,
   taskHandoffTool,
   updateTaskTool,
   validateWorkflowTool,
   visualizeWorkflowTool,
+  workflowHydrateTool,
   workflowPatchTool,
   workflowTreeTool,
 };
@@ -109,9 +105,7 @@ export const allTools: McpTool[] = [
   listNodesTool,
   connectNodesTool,
   disconnectNodesTool,
-  startWorkflowTool,
-  getNextStepTool,
-  resetWorkflowTool,
+  workflowHydrateTool,
   validateWorkflowTool,
   visualizeWorkflowTool,
   extractSubworkflowTool,

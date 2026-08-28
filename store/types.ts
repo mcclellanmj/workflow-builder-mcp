@@ -263,6 +263,9 @@ export type DependencyType =
 /** Priority levels for tasks. */
 export type TaskPriority = "critical" | "high" | "medium" | "low";
 
+/** Type of task item in the task tracking system. */
+export type TaskType = "task" | "epic" | "subtask" | "bug";
+
 /** A single assignable unit of work. */
 export interface Task {
   id: TaskId;
@@ -272,6 +275,8 @@ export interface Task {
   description: string;
   status: TaskStatus;
   priority?: TaskPriority;
+  /** The item type: "task" (default), "epic", "subtask", or "bug". */
+  type?: TaskType;
 
   // --- Ownership ---
   /** Free-form role label. User-defined, e.g. "frontend", "security", "human". */

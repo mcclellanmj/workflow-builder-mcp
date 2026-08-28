@@ -17,6 +17,9 @@ const TaskReadySchema = z.object({
   role: z.string().optional().describe(
     "Optional role name to filter claimable tasks for a specific role.",
   ),
+  includeEpics: z.boolean().optional().default(false).describe(
+    "Optional flag: when true, includes epics in the ready frontier. Defaults to false (only actionable tasks returned).",
+  ),
   limit: z.number().int().positive().optional().describe(
     "Optional maximum number of ready tasks to return.",
   ),
@@ -30,7 +33,7 @@ export const readyTasksTool = defineTool({
   description:
     "Computes the claimable ready frontier of tasks with zero unresolved blockers. This is the primary tool agents use to discover available work.",
   schema: TaskReadySchema,
-  execute: async ({ workflow, workflowId, executionId, role, limit, format }) => {
+  execute: async ({ workflow, workflowId, executionId, role, includeEpics, limit, format }) => {
     let actualWorkflowId = workflowId ?? workflow;
     if (actualWorkflowId) {
       const resolvedWf = await resolveWorkflow(actualWorkflowId);
@@ -43,6 +46,7 @@ export const readyTasksTool = defineTool({
       workflowId: actualWorkflowId,
       executionId,
       role,
+      includeEpics,
       limit,
     });
 

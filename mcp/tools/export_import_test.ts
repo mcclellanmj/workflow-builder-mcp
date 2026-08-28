@@ -9,10 +9,9 @@ import { addNodeTool } from "./add_node.ts";
 import { connectNodesTool } from "./connect_nodes.ts";
 import { createWorkflowTool } from "./create_workflow.ts";
 import { exportWorkflowTool } from "./export_workflow.ts";
-import { getNextStepTool } from "./get_next_step.ts";
 import { getWorkflowTool } from "./get_workflow.ts";
 import { importWorkflowTool } from "./import_workflow.ts";
-import { startWorkflowTool } from "./start_workflow.ts";
+import { saveExecution } from "../../store/kv.ts";
 
 async function createFreshKv(): Promise<Deno.Kv> {
   const kv = await Deno.openKv(":memory:");
@@ -237,18 +236,23 @@ Deno.test("Workflow Export & Import - Execution runs restoration", async () => {
     toNodeId: stepNode.id,
   });
 
-  // Start execution and advance
-  const startExec = await startWorkflowTool.execute({
+  // Create an execution directly for export test
+  const executionId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await saveExecution({
+    id: executionId,
     workflowId: workflow.id,
-    format: "json",
-  });
-  const startExecData = JSON.parse(startExec.content[0].text);
-  const executionId = startExecData.executionId;
-
-  await getNextStepTool.execute({
-    executionId,
-    nodeId: stepNode.id,
-    status: "completed",
+    status: "in_progress",
+    nodeStates: {
+      [stepNode.id]: {
+        nodeId: stepNode.id,
+        status: "completed",
+        error: null,
+        updatedAt: now,
+      },
+    },
+    createdAt: now,
+    updatedAt: now,
   });
 
   // Export with includeExecutions: true

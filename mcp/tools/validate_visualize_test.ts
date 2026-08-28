@@ -227,9 +227,6 @@ Deno.test("visualizeWorkflowTool - renders user_interaction node as parallelogra
   }
 });
 
-import { startWorkflowTool } from "./start_workflow.ts";
-import { getNextStepTool } from "./get_next_step.ts";
-
 Deno.test("visualizeWorkflowTool - exports interactive HTML with subworkflows, prompts, and iteration history", async () => {
   const kv = await Deno.openKv(":memory:");
   setKv(kv);
@@ -285,27 +282,9 @@ Deno.test("visualizeWorkflowTool - exports interactive HTML with subworkflows, p
       toNodeId: subNode.id,
     });
 
-    // 3. Start execution and run a step to produce iteration history
-    const startExecRes = await startWorkflowTool.execute({
-      workflowId: parentWf.id,
-      format: "json",
-    });
-    assert(!startExecRes.isError);
-    const startData = JSON.parse(startExecRes.content[0].text);
-    const executionId = startData.executionId;
-    assert(executionId, "Execution ID should be present");
-
-    // Advance start node
-    await getNextStepTool.execute({
-      executionId,
-      nodeId: parentStart.id,
-      status: "completed",
-    });
-
-    // 4. Test visualize with format: "html" and custom filePath
+    // 3. Test visualize with format: "html" and custom filePath
     const visHtmlRes = await visualizeWorkflowTool.execute({
       workflowId: parentWf.id,
-      executionId,
       format: "html",
       filePath: testHtmlFile,
     });

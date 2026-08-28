@@ -13,6 +13,9 @@ const TaskCreateSchema = z.object({
   priority: z.enum(["critical", "high", "medium", "low"]).optional().describe(
     "Optional task priority level.",
   ),
+  type: z.enum(["task", "epic", "subtask", "bug"]).optional().describe(
+    "Optional task type ('task', 'epic', 'subtask', or 'bug'). Defaults to 'task'.",
+  ),
   parentTaskId: z.string().optional().describe(
     "Optional parent task ID to nest this task under (creates hierarchical parent-child relation).",
   ),
@@ -43,6 +46,7 @@ export const createTaskTool = defineTool({
     description,
     role,
     priority,
+    type,
     parentTaskId,
     workflow,
     workflowId,
@@ -80,6 +84,7 @@ export const createTaskTool = defineTool({
       description,
       role,
       priority,
+      type,
       parentTaskId: actualParentTaskId,
       workflowId: actualWorkflowId,
       executionId,

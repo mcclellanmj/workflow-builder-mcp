@@ -33,11 +33,12 @@ Deno.test("McpServer integration test with client over InMemoryTransport", async
     assert(toolNames.includes("node_list"));
     assert(toolNames.includes("node_connect"));
     assert(toolNames.includes("node_disconnect"));
-    assert(toolNames.includes("workflow_start"));
-    assert(toolNames.includes("workflow_next"));
-    assert(toolNames.includes("workflow_reset"));
+    assert(toolNames.includes("workflow_hydrate"));
     assert(toolNames.includes("workflow_validate"));
     assert(toolNames.includes("workflow_visualize"));
+    assert(toolNames.includes("task_ready"));
+    assert(toolNames.includes("task_claim"));
+    assert(toolNames.includes("task_close"));
 
     // 2. Call workflow_create via client
     const createRes = await client.callTool({

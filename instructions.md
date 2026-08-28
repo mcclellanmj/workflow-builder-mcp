@@ -5,18 +5,20 @@ structured workflows, Directed Acyclic Graphs (DAGs), review-fix loops, and subw
 
 ---
 
-## 1. Core Concepts: Templates vs. Executions
+## 1. Core Concepts: Templates vs. Hydrated Epics & Tasks
 
 - **Workflow Definition (Template / DAG)**:
   - Created and modified using `workflow_create`, `node_add`, `node_connect`, `node_edit`,
     `node_delete`, `workflow_patch`, `workflow_validate`, `workflow_visualize`.
   - Defines the graph topology: nodes (`start`, `step`, `decision`, `user_interaction`,
-    `subworkflow`, `end`) and edges.
-- **Workflow Execution (Run Instance)**:
-  - Created by invoking `workflow_start({ workflow: "review-workflow" })`.
-  - Generates an isolated **`executionId`** (`crypto.randomUUID()`).
-  - All runtime step updates, iteration tracking, and branching decisions are scoped to this
-    `executionId`. Multiple concurrent runs of the same workflow never collide.
+    `subworkflow`, `end`) and directional edges.
+- **Workflow Hydration (Actionable Epic & Task DAG)**:
+  - Created by invoking `workflow_hydrate({ workflow: "review-workflow" })`.
+  - Transforms the workflow template into a root **Epic** (`type: "epic"`).
+  - Nested subworkflows hydrate into nested child Epics ("an epic in an epic").
+  - Nodes become actionable tasks; edges become directional blocking dependencies.
+  - Workflows serve to hydrate tasks and dependencies into an Epic. Stepping through workflow nodes
+    is retired in favor of native task management (`task_ready`, `task_claim`, `task_close`).
 
 ---
 
@@ -34,45 +36,53 @@ All tools support flexible entity identifiers so you never have to manually look
 
 ---
 
-## 3. Standard Execution Lifecycle
+## 3. Hydration & Task-Driven Execution Lifecycle
 
 Follow this standard loop when executing a workflow:
 
 ```mermaid
 flowchart TD
-    StartRun["1. workflow_start({ workflow: 'review-workflow' })"] --> ObtainExec["Obtain executionId & initial nextNodes"]
-    ObtainExec --> ActionLoop{"nextNodes remaining?"}
-    ActionLoop -- Yes --> RunNode["2. Execute node task(s)"]
-    RunNode --> StepNext["3. workflow_next({ executionId, node: 'step-1', status, decision? })"]
-    StepNext --> ActionLoop
-    ActionLoop -- "No (workflowComplete: true)" --> Finished["🎉 Execution Complete"]
+    Hydrate["1. workflow_hydrate({ workflow: 'review-workflow' })"] --> RootEpic["Root Epic created + Tasks & Dependencies wired"]
+    RootEpic --> Frontier["2. Ready Frontier returned (readyTasks)"]
+    Frontier --> ReadyPoll["task_ready({ workflowId })"]
+    ReadyPoll --> Claim["3. task_claim({ task, assignee })"]
+    Claim --> Prime["4. context_prime / Execute task"]
+    Prime --> Close["5. task_close({ task, reason })"]
+    Close --> Check{"All sibling tasks finished?"}
+    Check -- Yes --> AutoCloseEpic["🎉 Parent Epic auto-closes (cascades unblocks)"]
+    Check -- No --> UnblockDownstream["Downstream tasks unblocked"]
+    UnblockDownstream --> ReadyPoll
+    AutoCloseEpic --> ReadyPoll
 ```
 
-### Step 1: Start Execution (`workflow_start`)
+### Step 1: Hydrate Workflow into Epic (`workflow_hydrate`)
 
-- **Call**: `workflow_start({ workflow: "review-workflow" })`
+- **Call**: `workflow_hydrate({ workflow: "review-workflow" })`
 - **What it returns**:
-  - `executionId`: The unique ID identifying this run (required for subsequent `workflow_next`
-    calls).
-  - `nextNodes`: Array of actionable node(s) immediately following the start node.
-  - `workflowSummary`: Current node progress counts.
+  - `epic`: The root Epic created for this workflow run.
+  - `epics`: Array of all created Epics (root + nested subworkflow Epics).
+  - `tasks`: All actionable tasks created from nodes.
+  - `dependencies`: All dependency edges wired between tasks.
+  - `readyTasks`: Immediate ready frontier of tasks with zero open blockers.
+  - `suggestedNextTools`: Direct tool invocations for the LLM to claim and start work.
 
-### Step 2: Step Through Nodes (`workflow_next`)
+### Step 2: Discover Available Work (`task_ready`)
 
-- **Call**:
-  `workflow_next({ executionId: "<execution_id>", node: "Step 1", status: "completed" | "failed" | "skipped", decision?: "<branch_name>" })`
+- **Call**: `task_ready({ workflowId: "<workflow_id>", role?: "<role>" })`
 - **What it returns**:
-  - Lean JSON payload containing only the next actionable step(s), completed node status, and
-    workflow completion status (zero diagram or state dump bloat).
-- **Required parameters**:
-  - `executionId`: The active run ID from `workflow_start`.
-  - `node` / `nodeId`: The name, slug, or ID of the node being completed/reported.
-  - `status`: Outcome (`"completed"`, `"failed"`, or `"skipped"`).
-- **Conditional / Branching parameters**:
-  - `decision`: **Required** when `node` is a `decision` or `user_interaction` node with branching
-    conditions. Pass the chosen branch label matching an outbound edge condition (e.g.,
-    `"approved"`, `"needs_fixes"`, `"yes"`, `"no"`).
-  - `error`: Optional error string if `status === "failed"`.
+  - Array of claimable tasks that have zero unresolved blockers.
+
+### Step 3: Claim and Execute (`task_claim`)
+
+- **Call**: `task_claim({ task: "<task_id>", assignee: "<agent_id>" })`
+- Atomically locks the task to the current agent, preventing duplicate work.
+
+### Step 4: Complete Work (`task_close`)
+
+- **Call**: `task_close({ task: "<task_id>", reason: "Verified implementation" })`
+- Automatically evaluates dependent tasks and unblocks any downstream tasks whose prerequisites are
+  all satisfied.
+- Automatically auto-closes parent Epics when all child tasks are completed!
 
 ### Step 3: Inspecting Hierarchy (`workflow_tree`)
 
@@ -179,46 +189,44 @@ Memories persist institutional knowledge across runs, agent crashes, and session
 
 ---
 
-## 8. Tool Quick Reference (40 Tools)
+## 8. Tool Quick Reference (38 Tools)
 
-| Category                       | Tool Name                      | Description                                                       | Key Arguments                                                           |
-| :----------------------------- | :----------------------------- | :---------------------------------------------------------------- | :---------------------------------------------------------------------- |
-| **Execution**                  | `workflow_start`               | Begin an execution run instance.                                  | `workflow`, `format?`                                                   |
-| **Execution**                  | `workflow_next`                | Advance execution after completing a node (returns linked tasks). | `executionId`, `node`, `status`, `decision?`, `error?`                  |
-| **Execution**                  | `workflow_reset`               | Reset an execution run back to start.                             | `executionId`, `workflow?`                                              |
-| **Authoring**                  | `workflow_create`              | Create a new workflow template.                                   | `name`, `description?`, `intendedForIndependentRun?`                    |
-| **Authoring**                  | `workflow_list`                | List existing workflows.                                          | `filter?`, `format?`                                                    |
-| **Authoring**                  | `workflow_get`                 | Inspect workflow graph (nodes & edges).                           | `workflow`, `includeSubworkflows?`, `format?`                           |
-| **Authoring**                  | `workflow_search`              | Cross-workflow search across names, prompts & configs             | `query`, `workflow?`, `type?`, `includeDescriptions?`                   |
-| **Authoring**                  | `workflow_patch`               | Batch edit multiple nodes in one atomic transaction.              | `workflow`, `nodes: [{ node, name?, description?, config? }]`           |
-| **Authoring**                  | `workflow_tree`                | Recursive hierarchical view of nested subworkflows.               | `workflow`, `depth?`, `format?`                                         |
-| **Authoring**                  | `workflow_delete`              | Delete a workflow and all its nodes/edges.                        | `workflow`                                                              |
-| **Nodes**                      | `node_add`                     | Add a node to a workflow.                                         | `workflow`, `name`, `type`, `description?`, `config?`                   |
-| **Nodes**                      | `node_edit`                    | Modify an existing node.                                          | `workflow`, `node`, `name?`, `description?`, `config?`                  |
-| **Nodes**                      | `node_delete`                  | Delete a node and connected edges.                                | `workflow`, `node`                                                      |
-| **Nodes**                      | `node_list`                    | List all nodes in a workflow.                                     | `workflow`                                                              |
-| **Edges**                      | `node_connect`                 | Connect two nodes with optional condition.                        | `workflow`, `fromNode`, `toNode`, `condition?`                          |
-| **Edges**                      | `node_disconnect`              | Remove edge between two nodes.                                    | `workflow`, `fromNode`, `toNode`                                        |
-| **Validation & Viz**           | `workflow_validate`            | Validate DAG, start/end nodes, cycles, heuristics.                | `workflow`                                                              |
-| **Validation & Viz**           | `workflow_visualize`           | Generate SSR visualizer link, Mermaid chart, or HTML.             | `workflow`, `executionId?`, `format?`, `expiresInDays?`, `filePath?`    |
-| **Subworkflows & Portability** | `workflow_extract_subworkflow` | Extract node sequence into a child subworkflow.                   | `workflow`, `nodes`, `subworkflowName`                                  |
-| **Subworkflows & Portability** | `workflow_export`              | Export workflow bundle JSON.                                      | `workflow`, `includeSubworkflows?`, `filePath?`                         |
-| **Subworkflows & Portability** | `workflow_import`              | Import workflow bundle JSON.                                      | `bundleData?`, `filePath?`, `overwrite?`, `clone?`                      |
-| **Tasks**                      | `task_create`                  | Create an assignable work unit (bead).                            | `title`, `description?`, `role?`, `workflow?`, `node?`, `parentTaskId?` |
-| **Tasks**                      | `task_list`                    | List tasks with status filter and summary counts.                 | `workflow?`, `executionId?`, `status?`, `role?`, `assignee?`            |
-| **Tasks**                      | `task_get`                     | Get task details, dependencies, and child subtasks.               | `task`, `includeDependencies?`, `includeChildren?`                      |
-| **Tasks**                      | `task_update`                  | Modify task metadata and append to context notes.                 | `task`, `title?`, `description?`, `status?`, `priority?`, `context?`    |
-| **Tasks**                      | `task_close`                   | Close task and automatically unblock downstream tasks.            | `task`, `reason?`                                                       |
-| **Tasks**                      | `task_ready`                   | Compute claimable frontier (zero open blockers).                  | `workflow?`, `executionId?`, `role?`, `limit?`                          |
-| **Tasks**                      | `task_claim`                   | Atomically lock a task to an assignee.                            | `task`, `assignee`                                                      |
-| **Tasks**                      | `task_depend`                  | Add or remove dependency edges between tasks.                     | `action`, `fromTask`, `toTask`, `type?`                                 |
-| **Roles**                      | `role_create`                  | Define a user-defined role.                                       | `name`, `description?`                                                  |
-| **Roles**                      | `role_list`                    | List registered user-defined roles.                               | `format?`                                                               |
-| **Journal**                    | `journal_write`                | Save single-entry role shutdown snapshot.                         | `role`, `entry`, `writtenBy?`                                           |
-| **Journal**                    | `journal_read`                 | Read role's latest journal entry on wakeup.                       | `role`                                                                  |
-| **Memory**                     | `memory_save`                  | Save persistent memory (workflow, node, or role scope).           | `key`, `summary`, `content`, `scope`, `workflow?`, `node?`, `role?`     |
-| **Memory**                     | `memory_list`                  | List memory summaries with lastAccessed & accessCount.            | `workflow?`, `node?`, `role?`, `tags?`, `format?`                       |
-| **Memory**                     | `memory_recall`                | Retrieve full content and log access record.                      | `key`, `scope?`, `workflow?`, `node?`, `role?`, `accessedBy?`           |
-| **Memory**                     | `memory_delete`                | Delete memory and return lifetime accessCount.                    | `key`, `scope?`, `workflow?`, `node?`, `role?`                          |
-| **Handoff**                    | `task_handoff`                 | Transfer work preserving context and rejected approaches.         | `task`, `reason`, `contextSummary?`, `rejectedApproaches?`, `toRole?`   |
-| **Context**                    | `context_prime`                | Bootstrap agent session with journal, memories, and frontier.     | `workflow?`, `executionId?`, `taskId?`, `role?`, `tokenBudget?`         |
+| Category                       | Tool Name                      | Description                                                   | Key Arguments                                                                    |
+| :----------------------------- | :----------------------------- | :------------------------------------------------------------ | :------------------------------------------------------------------------------- |
+| **Hydration & Tasks**          | `workflow_hydrate`             | Hydrate workflow DAG into actionable Epic & Task DAG.         | `workflow`, `title?`, `description?`, `parentTaskId?`, `role?`, `priority?`      |
+| **Authoring**                  | `workflow_create`              | Create a new workflow template.                               | `name`, `description?`, `intendedForIndependentRun?`                             |
+| **Authoring**                  | `workflow_list`                | List existing workflows.                                      | `filter?`, `format?`                                                             |
+| **Authoring**                  | `workflow_get`                 | Inspect workflow graph (nodes & edges).                       | `workflow`, `includeSubworkflows?`, `format?`                                    |
+| **Authoring**                  | `workflow_search`              | Cross-workflow search across names, prompts & configs         | `query`, `workflow?`, `type?`, `includeDescriptions?`                            |
+| **Authoring**                  | `workflow_patch`               | Batch edit multiple nodes in one atomic transaction.          | `workflow`, `nodes: [{ node, name?, description?, config? }]`                    |
+| **Authoring**                  | `workflow_tree`                | Recursive hierarchical view of nested subworkflows.           | `workflow`, `depth?`, `format?`                                                  |
+| **Authoring**                  | `workflow_delete`              | Delete a workflow and all its nodes/edges.                    | `workflow`                                                                       |
+| **Nodes**                      | `node_add`                     | Add a node to a workflow.                                     | `workflow`, `name`, `type`, `description?`, `config?`                            |
+| **Nodes**                      | `node_edit`                    | Modify an existing node.                                      | `workflow`, `node`, `name?`, `description?`, `config?`                           |
+| **Nodes**                      | `node_delete`                  | Delete a node and connected edges.                            | `workflow`, `node`                                                               |
+| **Nodes**                      | `node_list`                    | List all nodes in a workflow.                                 | `workflow`                                                                       |
+| **Edges**                      | `node_connect`                 | Connect two nodes with optional condition.                    | `workflow`, `fromNode`, `toNode`, `condition?`                                   |
+| **Edges**                      | `node_disconnect`              | Remove edge between two nodes.                                | `workflow`, `fromNode`, `toNode`                                                 |
+| **Validation & Viz**           | `workflow_validate`            | Validate DAG, start/end nodes, cycles, heuristics.            | `workflow`                                                                       |
+| **Validation & Viz**           | `workflow_visualize`           | Generate SSR visualizer link, Mermaid chart, or HTML.         | `workflow`, `executionId?`, `format?`, `expiresInDays?`, `filePath?`             |
+| **Subworkflows & Portability** | `workflow_extract_subworkflow` | Extract node sequence into a child subworkflow.               | `workflow`, `nodes`, `subworkflowName`                                           |
+| **Subworkflows & Portability** | `workflow_export`              | Export workflow bundle JSON.                                  | `workflow`, `includeSubworkflows?`, `filePath?`                                  |
+| **Subworkflows & Portability** | `workflow_import`              | Import workflow bundle JSON.                                  | `bundleData?`, `filePath?`, `overwrite?`, `clone?`                               |
+| **Tasks**                      | `task_create`                  | Create an assignable work unit or epic.                       | `title`, `type?`, `description?`, `role?`, `workflow?`, `node?`, `parentTaskId?` |
+| **Tasks**                      | `task_list`                    | List tasks with status filter and summary counts.             | `workflow?`, `executionId?`, `status?`, `role?`, `assignee?`, `type?`            |
+| **Tasks**                      | `task_get`                     | Get task details, dependencies, and child subtasks.           | `task`, `includeDependencies?`, `includeChildren?`                               |
+| **Tasks**                      | `task_update`                  | Modify task metadata and append to context notes.             | `task`, `title?`, `description?`, `status?`, `priority?`, `context?`             |
+| **Tasks**                      | `task_close`                   | Close task and automatically unblock downstream tasks.        | `task`, `reason?`                                                                |
+| **Tasks**                      | `task_ready`                   | Compute claimable frontier (zero open blockers).              | `workflow?`, `role?`, `includeEpics?`, `limit?`                                  |
+| **Tasks**                      | `task_claim`                   | Atomically lock a task to an assignee.                        | `task`, `assignee`                                                               |
+| **Tasks**                      | `task_depend`                  | Add or remove dependency edges between tasks.                 | `action`, `fromTask`, `toTask`, `type?`                                          |
+| **Roles**                      | `role_create`                  | Define a user-defined role.                                   | `name`, `description?`                                                           |
+| **Roles**                      | `role_list`                    | List registered user-defined roles.                           | `format?`                                                                        |
+| **Journal**                    | `journal_write`                | Save single-entry role shutdown snapshot.                     | `role`, `entry`, `writtenBy?`                                                    |
+| **Journal**                    | `journal_read`                 | Read role's latest journal entry on wakeup.                   | `role`                                                                           |
+| **Memory**                     | `memory_save`                  | Save persistent memory (workflow, node, or role scope).       | `key`, `summary`, `content`, `scope`, `workflow?`, `node?`, `role?`              |
+| **Memory**                     | `memory_list`                  | List memory summaries with lastAccessed & accessCount.        | `workflow?`, `node?`, `role?`, `tags?`, `format?`                                |
+| **Memory**                     | `memory_recall`                | Retrieve full content and log access record.                  | `key`, `scope?`, `workflow?`, `node?`, `role?`, `accessedBy?`                    |
+| **Memory**                     | `memory_delete`                | Delete memory and return lifetime accessCount.                | `key`, `scope?`, `workflow?`, `node?`, `role?`                                   |
+| **Handoff**                    | `task_handoff`                 | Transfer work preserving context and rejected approaches.     | `task`, `reason`, `contextSummary?`, `rejectedApproaches?`, `toRole?`            |
+| **Context**                    | `context_prime`                | Bootstrap agent session with journal, memories, and frontier. | `workflow?`, `executionId?`, `taskId?`, `role?`, `tokenBudget?`                  |

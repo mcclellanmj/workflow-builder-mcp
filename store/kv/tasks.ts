@@ -11,6 +11,7 @@ import type {
   TaskId,
   TaskPriority,
   TaskStatus,
+  TaskType,
   WorkflowId,
 } from "../types.ts";
 import { getKv, MAX_ATOMIC_OPS, resolveUserId } from "./client.ts";
@@ -24,6 +25,7 @@ export interface CreateTaskInput {
   description?: string;
   status?: TaskStatus;
   priority?: TaskPriority;
+  type?: TaskType;
   role?: string;
   assignee?: string;
   claimedAt?: string;
@@ -45,6 +47,7 @@ export interface TaskFilters {
   executionId?: ExecutionId;
   nodeId?: NodeId;
   status?: TaskStatus | TaskStatus[];
+  type?: TaskType | TaskType[];
   assignee?: string;
   role?: string;
   parentTaskId?: TaskId;
@@ -57,10 +60,13 @@ export interface FrontierFilters {
   workflowId?: WorkflowId;
   executionId?: ExecutionId;
   role?: string;
+  type?: TaskType | TaskType[];
   limit?: number;
   userId?: string;
   /** Optional flag: if true, returns only open (unclaimed) ready tasks. Defaults to false. */
   unclaimedOnly?: boolean;
+  /** Optional flag: if true, includes epics in the ready frontier. Defaults to false. */
+  includeEpics?: boolean;
 }
 
 /**
@@ -118,6 +124,7 @@ export async function createTask(
     title,
     description: taskInput.description ?? "",
     status: taskInput.status || (taskInput.assignee ? "claimed" : "open"),
+    type: taskInput.type || "task",
     createdAt: taskInput.createdAt || now,
     updatedAt: taskInput.updatedAt || now,
   };
@@ -125,6 +132,9 @@ export async function createTask(
   const atomic = kv.atomic().set(["users", uid, "tasks", id], task);
 
   // Secondary indexes
+  if (task.type) {
+    atomic.set(["users", uid, "tasks_by_type", task.type, id], id);
+  }
   if (task.workflowId) {
     atomic.set(["users", uid, "tasks_by_workflow", task.workflowId, id], id);
   }
@@ -238,6 +248,13 @@ export async function listTasks(
     if (filters?.assignee && t.assignee !== filters.assignee) return false;
     if (filters?.role && t.role !== filters.role) return false;
     if (filters?.parentTaskId && t.parentTaskId !== filters.parentTaskId) return false;
+    if (filters?.type) {
+      if (Array.isArray(filters.type)) {
+        if (!t.type || !filters.type.includes(t.type)) return false;
+      } else {
+        if (t.type !== filters.type) return false;
+      }
+    }
     if (filters?.status) {
       if (Array.isArray(filters.status)) {
         if (!filters.status.includes(t.status)) return false;
@@ -349,6 +366,15 @@ export async function updateTask(
     }
   }
 
+  if (existing.type !== updated.type) {
+    if (existing.type) {
+      atomic.delete(["users", uid, "tasks_by_type", existing.type, taskId]);
+    }
+    if (updated.type) {
+      atomic.set(["users", uid, "tasks_by_type", updated.type, taskId], taskId);
+    }
+  }
+
   const res = await atomic.commit();
   if (!res.ok) {
     throw new Error(`Failed to update task ${taskId}: concurrent modification detected`);
@@ -383,6 +409,10 @@ export async function deleteTask(taskId: TaskId, userId?: string): Promise<void>
   opCount++;
 
   // 2. Delete secondary indexes
+  if (task.type) {
+    atomic.delete(["users", uid, "tasks_by_type", task.type, taskId]);
+    opCount++;
+  }
   if (task.workflowId) {
     atomic.delete(["users", uid, "tasks_by_workflow", task.workflowId, taskId]);
     opCount++;
@@ -588,13 +618,21 @@ export async function computeReadyFrontier(
     ? ["open", "blocked"]
     : ["open", "claimed", "blocked"];
 
-  const candidateTasks = await listTasks({
+  let candidateTasks = await listTasks({
     workflowId: filters?.workflowId,
     executionId: filters?.executionId,
     role: filters?.role,
     status: candidateStatuses,
     userId: uid,
   });
+
+  // By default, exclude tasks with type: "epic" from ready frontier unless explicitly requested
+  if (!filters?.includeEpics && !filters?.type) {
+    candidateTasks = candidateTasks.filter((t) => t.type !== "epic");
+  } else if (filters?.type) {
+    const allowed = Array.isArray(filters.type) ? filters.type : [filters.type];
+    candidateTasks = candidateTasks.filter((t) => t.type && allowed.includes(t.type));
+  }
 
   const readyTasks: Task[] = [];
 
@@ -753,6 +791,28 @@ export async function closeTask(
         if (allClosed) {
           const unblocked = await updateTask(dependentTask.id, { status: "open" }, uid);
           unblockedTasks.push(unblocked);
+        }
+      }
+    }
+  }
+
+  // Check if parent task (epic) should auto-close when all children are closed
+  if (task.parentTaskId) {
+    const siblings = await listTasks({ parentTaskId: task.parentTaskId }, { userId: uid });
+    const allSiblingsClosed = siblings.length > 0 &&
+      siblings.every((s) => s.status === "closed" || s.status === "wontfix");
+    if (allSiblingsClosed) {
+      const parent = await getTask(task.parentTaskId, uid);
+      if (parent && parent.status !== "closed" && parent.status !== "wontfix") {
+        const parentCloseResult = await closeTask(
+          parent.id,
+          `All child tasks completed (${siblings.length} tasks)`,
+          uid,
+        );
+        for (const unblocked of parentCloseResult.unblockedTasks) {
+          if (!unblockedTasks.some((t) => t.id === unblocked.id)) {
+            unblockedTasks.push(unblocked);
+          }
         }
       }
     }

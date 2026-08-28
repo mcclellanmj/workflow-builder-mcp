@@ -164,7 +164,6 @@ Deno.test("KV Atomic Chunking - deleteWorkflow and saveNodes with large node cou
 });
 
 import { listExecutions, listReferencedChildWorkflowIds, saveExecution } from "../../store/kv.ts";
-import { resetWorkflowTool } from "./reset_workflow.ts";
 
 Deno.test("Subworkflow reference indexing and batched execution lookups", async () => {
   const kv = await Deno.openKv(":memory:");
@@ -203,13 +202,6 @@ Deno.test("Subworkflow reference indexing and batched execution lookups", async 
 
     const execs = await listExecutions(parentWf.id);
     assertEquals(execs.length, 5);
-
-    // Test reset workflow with non-existent executionId returns isError: true
-    const resetRes = await resetWorkflowTool.execute({ executionId: "non-existent-id" });
-    assert(
-      resetRes.isError,
-      "Expected resetWorkflowTool to return error for non-existent executionId",
-    );
   } finally {
     kv.close();
   }
