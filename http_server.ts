@@ -24,6 +24,7 @@ import {
 import { handleOAuthServerRoutes } from "./routes/oauth_server_routes.ts";
 import { handlePasskeyManagementRoutes } from "./routes/passkey_routes.ts";
 import { handleStaticRoutes } from "./routes/static_routes.ts";
+import { handleTaskRoutes } from "./routes/task_routes.ts";
 import { handleTokenRoutes } from "./routes/token_routes.ts";
 import { handleVisualizeRoutes } from "./routes/visualize_routes.ts";
 
@@ -84,7 +85,11 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
   const visRes = await handleVisualizeRoutes(req, url, auth);
   if (visRes) return visRes;
 
-  // 9. Static / Discovery / Health / Profile Routes
+  // 9. Task Management, Kanban Web UI & REST API Routes (/tasks, /api/tasks/*)
+  const taskRes = await handleTaskRoutes(req, url, auth);
+  if (taskRes) return taskRes;
+
+  // 10. Static / Discovery / Health / Profile Routes
   const staticRes = await handleStaticRoutes(req, url, auth);
   if (staticRes) return staticRes;
 

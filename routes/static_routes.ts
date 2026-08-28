@@ -34,6 +34,11 @@ export function renderDashboardHtml(origin: string): string {
     .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 18px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
     .badge { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 4px 10px; border-radius: 9999px; background: #e0e7ff; color: #3730a3; }
     .badge-success { background: #d1fae5; color: #065f46; }
+    .nav-bar { display: flex; gap: 10px; margin-bottom: 20px; }
+    .nav-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; background: #e2e8f0; color: #1e293b; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 0.88rem; transition: background 0.15s; }
+    .nav-btn:hover { background: #cbd5e1; }
+    .nav-btn-primary { background: var(--primary); color: white; }
+    .nav-btn-primary:hover { background: var(--primary-hover); }
     .input-group { margin-bottom: 16px; }
     label { display: block; font-size: 0.88rem; font-weight: 600; margin-bottom: 6px; color: #334155; }
     input[type="text"] { width: 100%; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; outline: none; }
@@ -59,6 +64,12 @@ export function renderDashboardHtml(origin: string): string {
   </style>
 </head>
 <body>
+  <div class="nav-bar">
+    <a href="/" class="nav-btn nav-btn-primary">⚡ Dashboard</a>
+    <a href="/tasks" class="nav-btn">📋 Tasks Kanban Board</a>
+    <a href="/visualize" class="nav-btn">📊 Workflows Visualizer</a>
+  </div>
+
   <h1>🚀 Workflow MCP Remote Server <span class="badge badge-success">Passkey Auth</span></h1>
   <p>Production serverless MCP service with biometric Touch ID / Face ID authentication and user-scoped persistence.</p>
 
@@ -168,8 +179,10 @@ export function renderDashboardHtml(origin: string): string {
     </div>
 
     <div class="card">
-      <h2>📡 Available Endpoints</h2>
+      <h2>📡 Available Endpoints & Interfaces</h2>
       <ul>
+        <li><strong>Tasks Kanban Board UI</strong>: <code>GET ${origin}/tasks</code></li>
+        <li><strong>Task REST API</strong>: <code>GET /api/tasks</code>, <code>GET /api/tasks/ready</code>, <code>POST /api/tasks/:id/comments</code></li>
         <li><strong>Live SSR Visualizer</strong>: <code>GET ${origin}/visualize/:workflowId</code> (supports share tickets <code>?ticket=...</code>, 1 week default up to 1 year)</li>
         <li><strong>Stateless JSON-RPC MCP</strong>: <code>POST ${origin}/mcp</code></li>
         <li><strong>Health Probe</strong>: <code>GET ${origin}/health</code></li>
@@ -545,6 +558,8 @@ export async function handleStaticRoutes(
         passkeysEnabled: true,
         oauthConfigured: Boolean(getOAuthConfig()),
         endpoints: {
+          tasks: `${url.origin}/tasks`,
+          tasksApi: `${url.origin}/api/tasks`,
           mcp: `${url.origin}/mcp`,
           health: `${url.origin}/health`,
           authPasskey: `${url.origin}/auth/passkey/*`,

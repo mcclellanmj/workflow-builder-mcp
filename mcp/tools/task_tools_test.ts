@@ -10,6 +10,7 @@ import { closeTaskTool } from "./task_close.ts";
 import { readyTasksTool } from "./task_ready.ts";
 import { claimTaskTool } from "./task_claim.ts";
 import { dependTaskTool } from "./task_depend.ts";
+import { commentTaskTool } from "./task_comment.ts";
 
 const parseToolResponse = (res: ToolCallResponse) => {
   if (res.isError) {
@@ -369,6 +370,65 @@ Deno.test("Task Tools - Get with dependencies and children, Update with context 
     // Child2 should now be unblocked (status "open")
     const getChild2AfterRemove = await getTaskTool.execute({ taskId: child2.id });
     assertEquals(parseToolResponse(getChild2AfterRemove).task.status, "open");
+  } finally {
+    kv.close();
+  }
+});
+
+Deno.test("Task Tools - task_comment tool logs short comments with 256-char limit", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const taskRes = await createTaskTool.execute({
+      title: "Implement passkey biometric auth",
+      role: "security",
+    });
+    const task = parseToolResponse(taskRes).task;
+
+    // 1. Post short comment
+    const commentRes1 = await commentTaskTool.execute({
+      taskId: task.id,
+      author: "security-reviewer",
+      comment: "WebAuthn challenge validation approved.",
+    });
+    assert(!commentRes1.isError);
+    const commentData1 = parseToolResponse(commentRes1);
+    assertEquals(commentData1.comment.author, "security-reviewer");
+    assertEquals(commentData1.comment.content, "WebAuthn challenge validation approved.");
+    assertEquals(commentData1.task.comments.length, 1);
+
+    // 2. Post exact 256-character comment
+    const exact256 = "a".repeat(256);
+    const commentRes2 = await commentTaskTool.execute({
+      taskId: task.id,
+      author: "qa-bot",
+      comment: exact256,
+    });
+    assert(!commentRes2.isError);
+    const commentData2 = parseToolResponse(commentRes2);
+    assertEquals(commentData2.comment.content.length, 256);
+    assertEquals(commentData2.task.comments.length, 2);
+
+    // 3. Verify getTaskTool returns the comments array
+    const getRes = await getTaskTool.execute({ taskId: task.id });
+    const getData = parseToolResponse(getRes);
+    assertEquals(Array.isArray(getData.task.comments), true);
+    assertEquals(getData.task.comments.length, 2);
+
+    // 4. Reject comment over 256 characters
+    const commentResTooLong = await commentTaskTool.execute({
+      taskId: task.id,
+      comment: "b".repeat(257),
+    });
+    assertEquals(commentResTooLong.isError, true);
+
+    // 5. Reject empty comment
+    const commentResEmpty = await commentTaskTool.execute({
+      taskId: task.id,
+      comment: "   ",
+    });
+    assertEquals(commentResEmpty.isError, true);
   } finally {
     kv.close();
   }

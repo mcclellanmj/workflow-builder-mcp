@@ -7,6 +7,7 @@ import type {
   ExecutionId,
   NodeId,
   Task,
+  TaskComment,
   TaskDependency,
   TaskId,
   TaskPriority,
@@ -36,6 +37,7 @@ export interface CreateTaskInput {
   context?: string;
   rejectedApproaches?: string[];
   closedReason?: string;
+  comments?: TaskComment[];
   createdAt?: string;
   updatedAt?: string;
   closedAt?: string;
@@ -125,6 +127,7 @@ export async function createTask(
     description: taskInput.description ?? "",
     status: taskInput.status || (taskInput.assignee ? "claimed" : "open"),
     type: taskInput.type || "task",
+    comments: taskInput.comments ?? [],
     createdAt: taskInput.createdAt || now,
     updatedAt: taskInput.updatedAt || now,
   };
@@ -166,7 +169,11 @@ export async function getTask(taskId: TaskId, userId?: string): Promise<Task | n
   const uid = resolveUserId(userId);
   const kv = await getKv();
   const entry = await kv.get<Task>(["users", uid, "tasks", taskId]);
-  return entry.value;
+  if (!entry.value) return null;
+  return {
+    ...entry.value,
+    comments: entry.value.comments ?? [],
+  };
 }
 
 /**
@@ -235,7 +242,10 @@ export async function listTasks(
   } else {
     for await (const entry of kv.list<Task>({ prefix: ["users", uid, "tasks"] })) {
       if (entry.value && typeof entry.value === "object") {
-        candidateTasks.push(entry.value);
+        candidateTasks.push({
+          ...entry.value,
+          comments: entry.value.comments ?? [],
+        });
       }
     }
   }
@@ -281,7 +291,10 @@ async function fetchTasksByIds(kv: Deno.Kv, uid: string, ids: string[]): Promise
     const entries = await kv.getMany<Task[]>(keys);
     for (const entry of entries) {
       if (entry.value) {
-        results.push(entry.value);
+        results.push({
+          ...entry.value,
+          comments: entry.value.comments ?? [],
+        });
       }
     }
   }
@@ -819,4 +832,79 @@ export async function closeTask(
   }
 
   return { task: closedTask, unblockedTasks };
+}
+
+// ---------------------------------------------------------------------------
+// Task Comments (Max 256 chars)
+// ---------------------------------------------------------------------------
+
+/**
+ * Adds a short comment to a task (max 256 characters).
+ * Validates character limit and updates task with atomic concurrency protection.
+ */
+export async function addTaskComment(
+  taskId: TaskId,
+  commentInput: { author?: string; content: string },
+  userId?: string,
+): Promise<TaskComment> {
+  const content = commentInput.content?.trim();
+  if (!content) {
+    throw new Error("Comment content cannot be empty");
+  }
+  if (content.length > 256) {
+    throw new Error(
+      `Comment exceeds maximum length of 256 characters (received ${content.length} characters)`,
+    );
+  }
+
+  const uid = resolveUserId(userId);
+  const kv = await getKv();
+
+  const entry = await kv.get<Task>(["users", uid, "tasks", taskId]);
+  if (!entry.value) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+
+  const existing = entry.value;
+  const now = new Date().toISOString();
+  const comment: TaskComment = {
+    id: `cm-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`,
+    taskId,
+    userId: uid,
+    author: commentInput.author?.trim() || "anonymous",
+    content,
+    createdAt: now,
+  };
+
+  const updatedComments = [...(existing.comments ?? []), comment];
+  const updatedTask: Task = {
+    ...existing,
+    comments: updatedComments,
+    updatedAt: now,
+  };
+
+  const res = await kv.atomic()
+    .check(entry)
+    .set(["users", uid, "tasks", taskId], updatedTask)
+    .commit();
+
+  if (!res.ok) {
+    throw new Error(`Failed to add comment to task ${taskId}: concurrent modification detected`);
+  }
+
+  return comment;
+}
+
+/**
+ * Retrieves all comments for a task in chronological order.
+ */
+export async function getTaskComments(
+  taskId: TaskId,
+  userId?: string,
+): Promise<TaskComment[]> {
+  const task = await getTask(taskId, userId);
+  if (!task) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+  return task.comments ?? [];
 }

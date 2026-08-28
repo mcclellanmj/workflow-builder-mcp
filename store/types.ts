@@ -300,9 +300,21 @@ export interface Task {
   rejectedApproaches?: string[];
 
   closedReason?: string;
+  /** Chronological log of short comments (max 256 chars each). Guaranteed to be an array. */
+  comments: TaskComment[];
   createdAt: string;
   updatedAt: string;
   closedAt?: string;
+}
+
+/** A short comment logged on a task (maximum 256 characters). */
+export interface TaskComment {
+  id: string;
+  taskId: TaskId;
+  userId?: string;
+  author: string;
+  content: string;
+  createdAt: string;
 }
 
 /** A directed dependency edge between two tasks. */

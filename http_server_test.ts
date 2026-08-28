@@ -497,3 +497,154 @@ Deno.test("HTTP Server - SSR Visualizer and 30-Minute Share Ticket Routes", asyn
     kv.close();
   }
 });
+
+Deno.test("HTTP Server - Task Kanban Web UI and REST API Lifecycle", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const userId = "user_http_tasks";
+    const tokenInfo = await createApiToken(userId, "Tasks Token");
+    const authHeaders = {
+      "Authorization": `Bearer ${tokenInfo.token}`,
+      "Content-Type": "application/json",
+    };
+
+    // 1. GET /tasks renders Kanban Web UI
+    const uiReq = new Request("http://localhost:8000/tasks", { method: "GET" });
+    const uiRes = await handleHttpRequest(uiReq);
+    assertEquals(uiRes.status, 200);
+    assertEquals(uiRes.headers.get("content-type"), "text/html; charset=utf-8");
+    const uiHtml = await uiRes.text();
+    assert(uiHtml.includes("Tasks Board"));
+    assert(uiHtml.includes("Open / Backlog"));
+    assert(uiHtml.includes("In Progress"));
+    assert(uiHtml.includes("256 chars"));
+    assert(uiHtml.includes("kanbanBoard"));
+
+    // 2. POST /api/tasks - Create new task
+    const createReq = new Request("http://localhost:8000/api/tasks", {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        title: "Integrate Kanban Board",
+        description: "Add tasks web UI with Deno built-ins",
+        priority: "high",
+        role: "frontend",
+      }),
+    });
+    const createRes = await handleHttpRequest(createReq);
+    assertEquals(createRes.status, 201);
+    const createData = await createRes.json();
+    const taskId = createData.task.id;
+    assert(taskId.startsWith("tk-"));
+    assertEquals(createData.task.title, "Integrate Kanban Board");
+    assertEquals(Array.isArray(createData.task.comments), true);
+    assertEquals(createData.task.comments.length, 0);
+
+    // 3. GET /api/tasks - List tasks
+    const listReq = new Request("http://localhost:8000/api/tasks", {
+      method: "GET",
+      headers: authHeaders,
+    });
+    const listRes = await handleHttpRequest(listReq);
+    assertEquals(listRes.status, 200);
+    const listData = await listRes.json();
+    assertEquals(listData.count, 1);
+    assertEquals(listData.tasks[0].id, taskId);
+
+    // 4. GET /api/tasks/ready - Ready frontier
+    const readyReq = new Request("http://localhost:8000/api/tasks/ready", {
+      method: "GET",
+      headers: authHeaders,
+    });
+    const readyRes = await handleHttpRequest(readyReq);
+    assertEquals(readyRes.status, 200);
+    const readyData = await readyRes.json();
+    assertEquals(readyData.count, 1);
+    assertEquals(readyData.tasks[0].id, taskId);
+
+    // 5. POST /api/tasks/:id/comments - Add short comment (<= 256 chars)
+    const commentReq1 = new Request(`http://localhost:8000/api/tasks/${taskId}/comments`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        author: "alice",
+        content: "UI design looks great and responsive!",
+      }),
+    });
+    const commentRes1 = await handleHttpRequest(commentReq1);
+    assertEquals(commentRes1.status, 201);
+    const commentData1 = await commentRes1.json();
+    assertEquals(commentData1.comment.author, "alice");
+    assertEquals(commentData1.comment.content, "UI design looks great and responsive!");
+
+    // 6. POST /api/tasks/:id/comments - Reject comment > 256 chars
+    const commentReqTooLong = new Request(`http://localhost:8000/api/tasks/${taskId}/comments`, {
+      method: "POST",
+      headers: authHeaders,
+      body: JSON.stringify({
+        author: "alice",
+        content: "c".repeat(257),
+      }),
+    });
+    const commentResTooLong = await handleHttpRequest(commentReqTooLong);
+    assertEquals(commentResTooLong.status, 400);
+    const errData = await commentResTooLong.json();
+    assert(errData.error.includes("exceeds maximum length of 256 characters"));
+
+    // 7. GET /api/tasks/:id/comments - List comments
+    const getCommentsReq = new Request(`http://localhost:8000/api/tasks/${taskId}/comments`, {
+      method: "GET",
+      headers: authHeaders,
+    });
+    const getCommentsRes = await handleHttpRequest(getCommentsReq);
+    assertEquals(getCommentsRes.status, 200);
+    const getCommentsData = await getCommentsRes.json();
+    assertEquals(getCommentsData.count, 1);
+    assertEquals(getCommentsData.comments[0].content, "UI design looks great and responsive!");
+
+    // 8. PATCH /api/tasks/:id - Update task status and assignee
+    const patchReq = new Request(`http://localhost:8000/api/tasks/${taskId}`, {
+      method: "PATCH",
+      headers: authHeaders,
+      body: JSON.stringify({
+        status: "in_progress",
+        assignee: "alice",
+      }),
+    });
+    const patchRes = await handleHttpRequest(patchReq);
+    assertEquals(patchRes.status, 200);
+    const patchData = await patchRes.json();
+    assertEquals(patchData.task.status, "in_progress");
+    assertEquals(patchData.task.assignee, "alice");
+
+    // 9. GET /api/tasks/:id - Get task with details
+    const getTaskReq = new Request(`http://localhost:8000/api/tasks/${taskId}`, {
+      method: "GET",
+      headers: authHeaders,
+    });
+    const getTaskRes = await handleHttpRequest(getTaskReq);
+    assertEquals(getTaskRes.status, 200);
+    const getTaskData = await getTaskRes.json();
+    assertEquals(getTaskData.task.id, taskId);
+    assertEquals(getTaskData.task.comments.length, 1);
+
+    // 10. DELETE /api/tasks/:id - Delete task
+    const delReq = new Request(`http://localhost:8000/api/tasks/${taskId}`, {
+      method: "DELETE",
+      headers: authHeaders,
+    });
+    const delRes = await handleHttpRequest(delReq);
+    assertEquals(delRes.status, 200);
+
+    const getAfterDelReq = new Request(`http://localhost:8000/api/tasks/${taskId}`, {
+      method: "GET",
+      headers: authHeaders,
+    });
+    const getAfterDelRes = await handleHttpRequest(getAfterDelReq);
+    assertEquals(getAfterDelRes.status, 404);
+  } finally {
+    kv.close();
+  }
+});

@@ -32,6 +32,7 @@ import { closeTaskTool } from "./task_close.ts";
 import { readyTasksTool } from "./task_ready.ts";
 import { claimTaskTool } from "./task_claim.ts";
 import { dependTaskTool } from "./task_depend.ts";
+import { commentTaskTool } from "./task_comment.ts";
 
 // Memory tools
 import { memorySaveTool } from "./memory_save.ts";
@@ -55,6 +56,7 @@ export {
   addNodeTool,
   claimTaskTool,
   closeTaskTool,
+  commentTaskTool,
   connectNodesTool,
   contextPrimeTool,
   createTaskTool,
@@ -123,6 +125,7 @@ export const allTools: McpTool[] = [
   readyTasksTool,
   claimTaskTool,
   dependTaskTool,
+  commentTaskTool,
   // Memory
   memorySaveTool,
   memoryListTool,

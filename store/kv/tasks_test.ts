@@ -4,6 +4,7 @@ import { setKv } from "./client.ts";
 import { getRole } from "./roles.ts";
 import {
   addDependency,
+  addTaskComment,
   claimTask,
   closeTask,
   computeReadyFrontier,
@@ -11,6 +12,7 @@ import {
   deleteTask,
   getDependencies,
   getTask,
+  getTaskComments,
   listTasks,
   removeDependency,
   updateTask,
@@ -442,6 +444,77 @@ Deno.test("Tasks - User Tenant Isolation", async () => {
         () => closeTask(aliceTaskId),
         Error,
         `Task not found: ${aliceTaskId}`,
+      );
+    });
+  } finally {
+    kv.close();
+  }
+});
+
+Deno.test("Tasks - Comments Log and 256-character limitation", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const userId = "user_comments_test";
+
+    await withUserContext(userId, async () => {
+      // 1. Newly created task has empty comments array (never undefined)
+      const task = await createTask({
+        title: "Review pull request #42",
+        role: "reviewer",
+      });
+
+      assertEquals(Array.isArray(task.comments), true);
+      assertEquals(task.comments.length, 0);
+
+      // 2. Add valid comments <= 256 characters
+      const c1 = await addTaskComment(task.id, {
+        author: "alice",
+        content: "Looks good, left two minor suggestions on line 40.",
+      });
+
+      assertEquals(c1.taskId, task.id);
+      assertEquals(c1.author, "alice");
+      assertEquals(c1.content, "Looks good, left two minor suggestions on line 40.");
+      assertMatch(c1.id, /^cm-[0-9a-f]{8}/);
+
+      // 3. Add second comment exactly 256 characters
+      const exact256 = "x".repeat(256);
+      const c2 = await addTaskComment(task.id, {
+        author: "bot",
+        content: exact256,
+      });
+      assertEquals(c2.content.length, 256);
+
+      // 4. Retrieve task and comments
+      const fetchedTask = await getTask(task.id);
+      assertEquals(fetchedTask?.comments.length, 2);
+      assertEquals(fetchedTask?.comments[0].author, "alice");
+      assertEquals(fetchedTask?.comments[1].author, "bot");
+
+      const fetchedComments = await getTaskComments(task.id);
+      assertEquals(fetchedComments.length, 2);
+
+      // 5. Reject empty comments
+      await assertRejects(
+        () => addTaskComment(task.id, { content: "" }),
+        Error,
+        "Comment content cannot be empty",
+      );
+
+      await assertRejects(
+        () => addTaskComment(task.id, { content: "   " }),
+        Error,
+        "Comment content cannot be empty",
+      );
+
+      // 6. Reject comment exceeding 256 characters (257 characters)
+      const tooLong = "x".repeat(257);
+      await assertRejects(
+        () => addTaskComment(task.id, { content: tooLong }),
+        Error,
+        "exceeds maximum length of 256 characters",
       );
     });
   } finally {
