@@ -249,7 +249,6 @@ Deno.test("Workflow Export & Import - Execution runs restoration", async () => {
     executionId,
     nodeId: stepNode.id,
     status: "completed",
-    format: "json",
   });
 
   // Export with includeExecutions: true

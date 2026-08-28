@@ -220,6 +220,10 @@ export function formatWorkflowStartMarkdown(
   return md;
 }
 
+/**
+ * @deprecated `workflow_next` now returns a lean JSON response directly.
+ * This formatter is retained for backward compatibility with external consumers.
+ */
 export function formatWorkflowNextMarkdown(
   workflow: Workflow,
   currentNode: WorkflowNode,

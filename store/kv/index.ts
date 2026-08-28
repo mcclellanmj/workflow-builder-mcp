@@ -9,3 +9,7 @@ export * from "./edges.ts";
 export * from "./executions.ts";
 export * from "./bundles.ts";
 export * from "./tickets.ts";
+export * from "./tasks.ts";
+export * from "./roles.ts";
+export * from "./memories.ts";
+export * from "./handoffs.ts";

@@ -394,16 +394,6 @@ Deno.test("User Interaction Node Execution - prompt, options mapping, and rich i
       return JSON.parse(jsonItem.text);
     };
 
-    const parseResponseMarkdown = (
-      res: {
-        content: Array<{ type: string; text: string; annotations?: { audience?: string[] } }>;
-      },
-    ) => {
-      const mdItem = res.content.find((c) => c.annotations?.audience?.includes("user")) ??
-        res.content[0];
-      return mdItem.text;
-    };
-
     // 1. Create a workflow: Start -> Review Step -> User Interaction -> [Fix Step -> Review Step, End]
     const createRes = await createWorkflowTool.execute({
       name: "Interactive Code Fix Loop",
@@ -498,18 +488,15 @@ Deno.test("User Interaction Node Execution - prompt, options mapping, and rich i
     assertEquals(reviewNextData.nextNodes[0].id, userAskNode.id);
     assertEquals(reviewNextData.nextNodes[0].type, "user_interaction");
 
-    // Check markdown for rich instructions to LLM and user
-    const markdown = parseResponseMarkdown(reviewNextRes);
-    assert(
-      markdown.includes("👤 **User Interaction Required**"),
-      "Expected user interaction block in markdown",
+    // Check that user_interaction node config contains prompt and options for orchestrator
+    assertEquals(
+      reviewNextData.nextNodes[0].config.prompt,
+      "Found 2 minor style issues. Would you like to fix them automatically?",
     );
-    assert(markdown.includes("Found 2 minor style issues"), "Expected prompt text in markdown");
-    assert(
-      markdown.includes("ask_question"),
-      "Expected ask_question tool recommendation in markdown",
-    );
-    assert(markdown.includes('"Yes, fix minor issues"'), "Expected option label in markdown");
+    const opts = reviewNextData.nextNodes[0].config.options as Record<string, string>;
+    assertEquals(opts["Yes, fix minor issues"], "fix_minor");
+    assertEquals(opts["No, skip and finish"], "finish_loop");
+    assertEquals(reviewNextData.nextNodes[0].config.allowFreeText, true);
 
     // 4. Advance user_interaction with display label matching option map
     const userSelectRes = await getNextStepTool.execute({

@@ -25,28 +25,72 @@ import { searchWorkflowTool } from "./search_workflow.ts";
 import { workflowPatchTool } from "./patch_workflow.ts";
 import { workflowTreeTool } from "./tree_workflow.ts";
 
+// Task tools
+import { createTaskTool } from "./task_create.ts";
+import { listTasksTool } from "./task_list.ts";
+import { getTaskTool } from "./task_get.ts";
+import { updateTaskTool } from "./task_update.ts";
+import { closeTaskTool } from "./task_close.ts";
+import { readyTasksTool } from "./task_ready.ts";
+import { claimTaskTool } from "./task_claim.ts";
+import { dependTaskTool } from "./task_depend.ts";
+
+// Memory tools
+import { memorySaveTool } from "./memory_save.ts";
+import { memoryListTool } from "./memory_list.ts";
+import { memoryRecallTool } from "./memory_recall.ts";
+import { memoryDeleteTool } from "./memory_delete.ts";
+
+// Role & Journal tools
+import { roleCreateTool } from "./role_create.ts";
+import { roleListTool } from "./role_list.ts";
+import { journalWriteTool } from "./journal_write.ts";
+import { journalReadTool } from "./journal_read.ts";
+
+// Handoff & Context Prime tools
+import { taskHandoffTool } from "./task_handoff.ts";
+import { contextPrimeTool } from "./context_prime.ts";
+
 import type { McpTool } from "../registry.ts";
 
 export {
   addNodeTool,
+  claimTaskTool,
+  closeTaskTool,
   connectNodesTool,
+  contextPrimeTool,
+  createTaskTool,
   createWorkflowTool,
   deleteNodeTool,
   deleteWorkflowTool,
+  dependTaskTool,
   disconnectNodesTool,
   editNodeTool,
   exportWorkflowTool,
   extractSubworkflowTool,
   getNextStepTool,
   getNodeTool,
+  getTaskTool,
   getWorkflowTool,
   importWorkflowTool,
+  journalReadTool,
+  journalWriteTool,
   listNodesTool,
+  listTasksTool,
   listWorkflowsTool,
+  memoryDeleteTool,
+  memoryListTool,
+  memoryRecallTool,
+  memorySaveTool,
+  readyTasksTool,
   resetWorkflowTool,
+  roleCreateTool,
+  roleListTool,
   searchWorkflowTool,
   searchWorkflowTool as workflowSearchTool,
   startWorkflowTool,
+  taskHandoffTool,
+  updateTaskTool,
   validateWorkflowTool,
   visualizeWorkflowTool,
   workflowPatchTool,
@@ -76,4 +120,26 @@ export const allTools: McpTool[] = [
   searchWorkflowTool,
   workflowPatchTool,
   workflowTreeTool,
+  // Tasks
+  createTaskTool,
+  listTasksTool,
+  getTaskTool,
+  updateTaskTool,
+  closeTaskTool,
+  readyTasksTool,
+  claimTaskTool,
+  dependTaskTool,
+  // Memory
+  memorySaveTool,
+  memoryListTool,
+  memoryRecallTool,
+  memoryDeleteTool,
+  // Roles & Journal
+  roleCreateTool,
+  roleListTool,
+  journalWriteTool,
+  journalReadTool,
+  // Handoff & Context Prime
+  taskHandoffTool,
+  contextPrimeTool,
 ];

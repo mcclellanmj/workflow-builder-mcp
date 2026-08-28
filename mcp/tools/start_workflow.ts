@@ -10,7 +10,6 @@ import {
   formatActionableNode,
   formatWorkflowStartMarkdown,
   hydrateNodesWithExecution,
-  renderMermaidFlowchart,
   requireWorkflowGraph,
   richResponse,
 } from "../helpers.ts";
@@ -32,7 +31,7 @@ const StartWorkflowArgsSchema = z.object({
 export const startWorkflowTool = defineTool({
   name: "workflow_start",
   description:
-    "Begins a new workflow execution. Validates the workflow graph structure, creates a unique execution ID scoped to this run, marks the start node as completed, and returns the initial actionable node(s) along with the execution ID (required for subsequent workflow_next calls), workflow status summary, and visual diagram. Supports workflow UUIDs, exact names, or slugs. Multiple projects can start independent executions of the same workflow simultaneously.",
+    "Begins a new workflow execution. Validates the workflow graph structure, creates a unique execution ID scoped to this run, marks the start node as completed, and returns the initial actionable node(s) along with the execution ID (required for subsequent workflow_next calls) and workflow status summary. Supports workflow UUIDs, exact names, or slugs. Multiple projects can start independent executions of the same workflow simultaneously.",
   schema: StartWorkflowArgsSchema,
   execute: async ({ workflow, workflowId, format }) => {
     const targetWorkflow = workflow ?? workflowId!;
@@ -126,12 +125,9 @@ export const startWorkflowTool = defineTool({
       validation.warnings,
     );
 
-    const mermaid = renderMermaidFlowchart(hydratedNodes, edges);
-
     return richResponse({
       data: responseData,
       markdown,
-      mermaidDiagram: mermaid,
       format,
     });
   },

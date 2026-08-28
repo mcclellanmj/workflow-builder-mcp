@@ -42,12 +42,12 @@ Deno.test("Rich Formatting - Format Modes and MCP Annotations", async () => {
     await connectNodesTool.execute({ workflowId, fromNodeId: startNode.id, toNodeId: stepNode.id });
     await connectNodesTool.execute({ workflowId, fromNodeId: stepNode.id, toNodeId: endNode.id });
 
-    // 3. Test workflow_start with format: "markdown"
+    // 3. Test workflow_start with format: "markdown" (Mermaid diagram dropped)
     const startMdRes = await startWorkflowTool.execute({ workflowId, format: "markdown" });
     assert(!startMdRes.isError);
     assertEquals(startMdRes.content.length, 1);
     assert(startMdRes.content[0].text.includes("## 🚀 Workflow Started: **Formatting Pipeline**"));
-    assert(startMdRes.content[0].text.includes("```mermaid\nflowchart TD"));
+    assert(!startMdRes.content[0].text.includes("```mermaid"));
     // executionId should appear in markdown
     assert(startMdRes.content[0].text.includes("**Execution ID**"));
 
@@ -60,39 +60,38 @@ Deno.test("Rich Formatting - Format Modes and MCP Annotations", async () => {
     assertEquals(parsedStartJson.workflowName, "Formatting Pipeline");
     assert(typeof parsedStartJson.executionId === "string");
 
-    // 5. Test workflow_start with default format ("both")
+    // 5. Test workflow_start with default format ("both") - returns markdown and json, no mermaid
     const startBothRes = await startWorkflowTool.execute({ workflowId });
     assert(!startBothRes.isError);
-    assertEquals(startBothRes.content.length, 3);
+    assertEquals(startBothRes.content.length, 2);
 
     // Block 1: Markdown (user audience)
     assertEquals(startBothRes.content[0].annotations?.audience, ["user"]);
     assert(startBothRes.content[0].text.includes("## 🚀 Workflow Started:"));
+    assert(!startBothRes.content[0].text.includes("```mermaid"));
 
-    // Block 2: Mermaid diagram (user audience)
-    assertEquals(startBothRes.content[1].annotations?.audience, ["user"]);
-    assert(startBothRes.content[1].text.includes("```mermaid\nflowchart TD"));
-
-    // Block 3: JSON data (assistant audience)
-    assertEquals(startBothRes.content[2].annotations?.audience, ["assistant"]);
-    const parsedBothJson = JSON.parse(startBothRes.content[2].text);
+    // Block 2: JSON data (assistant audience)
+    assertEquals(startBothRes.content[1].annotations?.audience, ["assistant"]);
+    const parsedBothJson = JSON.parse(startBothRes.content[1].text);
     assertEquals(parsedBothJson.workflowId, workflowId);
     const executionId = parsedBothJson.executionId;
     assert(typeof executionId === "string" && executionId.length > 0);
 
-    // 6. Test workflow_next with format: "markdown" (using executionId)
-    const nextMdRes = await getNextStepTool.execute({
+    // 6. Test workflow_next always returns lean JSON (no format param, no graph, no workflowSummary)
+    const nextRes = await getNextStepTool.execute({
       executionId,
       nodeId: stepNode.id,
       status: "completed",
-      format: "markdown",
     });
-    assert(!nextMdRes.isError);
-    assertEquals(nextMdRes.content.length, 1);
-    assert(nextMdRes.content[0].text.includes("## ⚡ Workflow Progress:"));
-    assert(nextMdRes.content[0].text.includes("🎉 Workflow Complete!"));
-    // executionId should appear in markdown
-    assert(nextMdRes.content[0].text.includes("**Execution ID**"));
+    assert(!nextRes.isError);
+    assertEquals(nextRes.content.length, 1);
+    const parsedNext = JSON.parse(nextRes.content[0].text);
+    assertEquals(parsedNext.executionId, executionId);
+    assertEquals(parsedNext.workflowComplete, true);
+    assertEquals(parsedNext.completedNode.id, stepNode.id);
+    assertEquals(parsedNext.completedNode.status, "completed");
+    assertEquals(parsedNext.nextNodes.length, 0);
+    assertEquals(parsedNext.workflowSummary, undefined);
 
     // 7. Test workflow_list and node_list formatting
     const listWfMd = await listWorkflowsTool.execute({ format: "markdown" });
@@ -183,13 +182,12 @@ Deno.test("Rich Formatting - Sub-Agent Instructions in workflow_start and workfl
       executionId: exec2,
       nodeId: preStepNode.id,
       status: "completed",
-      format: "markdown",
     });
     assert(!nextRes.isError);
-    const nextText = nextRes.content[0].text;
-    assert(nextText.includes("Sub-Agent Execution Required"));
-    assert(nextText.includes("Deep Analysis"));
-    assert(nextText.includes("Delegate this task to a sub-agent or child agent"));
+    const nextJson = JSON.parse(nextRes.content[0].text);
+    assertEquals(nextJson.nextNodes.length, 1);
+    assertEquals(nextJson.nextNodes[0].name, "Deep Analysis");
+    assertEquals(nextJson.nextNodes[0].runInSubAgent, true);
   } finally {
     kv.close();
   }

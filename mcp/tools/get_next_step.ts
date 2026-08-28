@@ -1,18 +1,14 @@
 import { z } from "zod";
 import { createErrorResponse, type ToolCallResponse } from "../registry.ts";
-import { saveExecution } from "../../store/kv.ts";
+import { listTasks, saveExecution } from "../../store/kv.ts";
 import type { WorkflowEdge, WorkflowNode } from "../../store/types.ts";
 import {
   advanceAcrossEdges,
-  computeWorkflowSummary,
   defineTool,
   formatActionableNode,
-  formatWorkflowNextMarkdown,
-  hydrateNodesWithExecution,
-  renderMermaidFlowchart,
+  jsonResponse,
   requireExecution,
   resolveNode,
-  richResponse,
 } from "../helpers.ts";
 
 const WorkflowNextArgsSchema = z.object({
@@ -31,9 +27,6 @@ const WorkflowNextArgsSchema = z.object({
   error: z.string().optional().describe("Optional error message if the node failed."),
   decision: z.string().optional().describe(
     "For decision or user_interaction nodes: the chosen branch matching an outbound edge condition (e.g. 'yes', 'no', 'approved', 'fix_minor').",
-  ),
-  format: z.enum(["markdown", "json", "both"]).optional().default("both").describe(
-    "Optional output format. 'markdown' returns human-readable status, 'json' returns raw data, 'both' (default) returns multi-block annotated content for user and assistant.",
   ),
 }).refine((data) => data.node || data.nodeId, {
   message: "Node ('node' or 'nodeId') must be provided.",
@@ -146,9 +139,9 @@ function buildExecutionSummary(
 export const getNextStepTool = defineTool({
   name: "workflow_next",
   description:
-    "Core orchestration tool. Given an execution ID (from workflow_start) and the outcome of a completed node, updates the execution's node state, traverses outbound graph edges (resolving branch conditions for decision nodes), automatically marks reached 'end' nodes as completed, and returns the next actionable step(s) or signals workflow completion. Supports node UUIDs, exact names, or slugs. Each concurrent execution is fully isolated — multiple projects can run the same workflow template simultaneously.",
+    "Core orchestration tool. Given an execution ID (from workflow_start) and the outcome of a completed node, updates the execution's node state, traverses outbound graph edges (resolving branch conditions for decision nodes), automatically marks reached 'end' nodes as completed, and returns a lean JSON payload containing the next actionable step(s) or signals workflow completion. Supports node UUIDs, exact names, or slugs. Each concurrent execution is fully isolated — multiple projects can run the same workflow template simultaneously.",
   schema: WorkflowNextArgsSchema,
-  execute: async ({ executionId, node, nodeId, status, error, decision, format }) => {
+  execute: async ({ executionId, node, nodeId, status, error, decision }) => {
     // Load the execution and its workflow graph
     const execCheck = await requireExecution(executionId);
     if ("error" in execCheck) return execCheck.error;
@@ -178,7 +171,7 @@ export const getNextStepTool = defineTool({
     };
     execution.updatedAt = now;
 
-    // Build a node map hydrated with execution state for edge traversal and rendering
+    // Build a node map hydrated with execution state for edge traversal
     const nodeMap = new Map<string, WorkflowNode>(
       nodes.map((n) => {
         const ns = execution.nodeStates[n.id];
@@ -210,25 +203,17 @@ export const getNextStepTool = defineTool({
       }`;
       const responseData = {
         executionId,
-        nextNodes: [],
+        completedNode: {
+          id: currentNode.id,
+          name: currentNode.name,
+          status: "failed",
+          error: error ?? null,
+        },
         workflowComplete: false,
+        nextNodes: [],
         summary,
       };
-      const markdown = formatWorkflowNextMarkdown(
-        workflow,
-        currentNode,
-        status,
-        summary,
-        [],
-        [],
-        false,
-        executionId,
-      );
-      return richResponse({
-        data: responseData,
-        markdown,
-        format,
-      });
+      return jsonResponse(responseData);
     }
 
     const outboundEdges = edges.filter((e) => e.fromNodeId === resolvedNodeId);
@@ -258,34 +243,33 @@ export const getNextStepTool = defineTool({
       completedEndNodes,
     );
 
-    const hydratedNodes = hydrateNodesWithExecution(Array.from(nodeMap.values()), execution);
+    // Query any tasks linked to this workflow execution
+    let linkedTasks: unknown[] | undefined;
+    try {
+      const tasks = await listTasks({
+        workflowId: workflow.id,
+        executionId,
+      });
+      if (tasks.length > 0) {
+        linkedTasks = tasks;
+      }
+    } catch {
+      // Ignored if tasks query fails
+    }
 
     const responseData = {
       executionId,
-      nextNodes: actionableNextNodes.map(formatActionableNode),
+      completedNode: {
+        id: currentNode.id,
+        name: currentNode.name,
+        status,
+      },
       workflowComplete,
+      nextNodes: actionableNextNodes.map(formatActionableNode),
       summary,
-      workflowSummary: computeWorkflowSummary(hydratedNodes),
+      ...(linkedTasks ? { linkedTasks } : {}),
     };
 
-    const markdown = formatWorkflowNextMarkdown(
-      workflow,
-      currentNode,
-      status,
-      summary,
-      actionableNextNodes,
-      completedEndNodes,
-      workflowComplete,
-      executionId,
-    );
-
-    const mermaid = renderMermaidFlowchart(hydratedNodes, edges);
-
-    return richResponse({
-      data: responseData,
-      markdown,
-      mermaidDiagram: mermaid,
-      format,
-    });
+    return jsonResponse(responseData);
   },
 });

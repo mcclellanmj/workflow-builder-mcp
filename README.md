@@ -38,7 +38,8 @@ transport** ready for deployment on Deno Deploy or any serverless runtime.
   - Generates persistent **Bearer API Tokens** (`wf_...`) for headless scripts and CI/CD pipelines.
 - **Serverless-First Stateless HTTP Transport**:
   - **Stateless HTTP JSON-RPC (`POST /mcp` / `POST /`)**: Designed specifically for serverless
-    architectures (Deno Deploy, Cloudflare, Lambda) with no persistent socket or connection state overhead.
+    architectures (Deno Deploy, Cloudflare, Lambda) with no persistent socket or connection state
+    overhead.
 - **Multi-Tenant User Isolation**: All workflows, nodes, edges, and executions are scoped by
   `userId` in Deno KV (`["users", userId, ...]`).
 - **Workflow & Graph Management**: Create, list, inspect, patch, search, tree, and delete workflow

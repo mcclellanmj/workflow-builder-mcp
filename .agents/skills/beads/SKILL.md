@@ -5,7 +5,8 @@ description: Use when working in a repository that uses bd or Beads for durable 
 
 # Beads
 
-Use Beads as the shared project task system. Local plans, scratch files, and personal memories are useful, but they are not the durable source of truth for project work.
+Use Beads as the shared project task system. Local plans, scratch files, and personal memories are
+useful, but they are not the durable source of truth for project work.
 
 ## First Step
 
@@ -69,12 +70,14 @@ Use Beads for:
 - work that must survive thread reset, compaction, or handoff
 - status that another person or agent should be able to resume
 
-Use agent-local planning tools only for the current turn's execution checklist. Do not treat them as shared project state.
+Use agent-local planning tools only for the current turn's execution checklist. Do not treat them as
+shared project state.
 
 ## Rules
 
 - Do not create markdown TODO files as the source of truth when Beads is available.
 - Do not use `bd edit`; it opens an interactive editor. Use `bd update` flags instead.
 - Prefer `--json` when parsing `bd` output programmatically.
-- If hooks are installed, `bd prime` may already be injected. Run it manually when context is missing.
+- If hooks are installed, `bd prime` may already be injected. Run it manually when context is
+  missing.
 - Do not auto-close or mutate tasks unless the work is actually complete.

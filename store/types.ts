@@ -233,3 +233,162 @@ export interface ViewTicket {
   /** Expiration timestamp in milliseconds (e.g. Date.now() + 30 * 60 * 1000). */
   expiresAt: number;
 }
+
+// ---------------------------------------------------------------------------
+// Tasks & Dependencies (Beads)
+// ---------------------------------------------------------------------------
+
+/** Unique identifier for a task. Hash-based, e.g. "tk-a1b2c3". */
+export type TaskId = string;
+
+/** Status lifecycle of a task. */
+export type TaskStatus =
+  | "open"
+  | "claimed"
+  | "in_progress"
+  | "blocked"
+  | "review"
+  | "closed"
+  | "wontfix";
+
+/** Typed directional dependency between tasks. */
+export type DependencyType =
+  | "blocks"
+  | "parent-child"
+  | "waits-for"
+  | "conditional-blocks"
+  | "discovered-from"
+  | "related";
+
+/** Priority levels for tasks. */
+export type TaskPriority = "critical" | "high" | "medium" | "low";
+
+/** A single assignable unit of work. */
+export interface Task {
+  id: TaskId;
+  userId?: string;
+
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority?: TaskPriority;
+
+  // --- Ownership ---
+  /** Free-form role label. User-defined, e.g. "frontend", "security", "human". */
+  role?: string;
+  /** Agent or person who claimed this task. */
+  assignee?: string;
+  claimedAt?: string;
+
+  // --- Workflow linkage ---
+  workflowId?: WorkflowId;
+  executionId?: ExecutionId;
+  nodeId?: NodeId;
+
+  // --- Hierarchy ---
+  parentTaskId?: TaskId;
+
+  // --- Context (for handoffs & continuity) ---
+  /** Accumulated notes, progress, and context from the working agent. */
+  context?: string;
+  /** Approaches that were tried and failed — prevents the next agent from repeating. */
+  rejectedApproaches?: string[];
+
+  closedReason?: string;
+  createdAt: string;
+  updatedAt: string;
+  closedAt?: string;
+}
+
+/** A directed dependency edge between two tasks. */
+export interface TaskDependency {
+  id: string;
+  fromTaskId: TaskId;
+  toTaskId: TaskId;
+  type: DependencyType;
+  createdAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Roles & Role Journals
+// ---------------------------------------------------------------------------
+
+/** A named role that can be assigned to tasks. */
+export interface Role {
+  id: string;
+  userId?: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Single-entry journal for a role. Overwritten on each write. */
+export interface RoleJournal {
+  roleId: string;
+  userId?: string;
+  /** The journal content — what the role was doing, where it left off. */
+  entry: string;
+  /** Who wrote this entry (agent identifier). */
+  writtenBy?: string;
+  writtenAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Memory System
+// ---------------------------------------------------------------------------
+
+export type MemoryScope = "workflow" | "node" | "role";
+
+/** A persistent memory entry. */
+export interface Memory {
+  id: string;
+  userId?: string;
+  key: string;
+  /** Short one-line summary shown in memory_list. */
+  summary: string;
+  /** Full content, returned only by memory_recall. */
+  content: string;
+  scope: MemoryScope;
+
+  // Scope references (set based on scope)
+  workflowId?: WorkflowId;
+  nodeId?: NodeId;
+  roleId?: string;
+
+  // Metadata
+  source?: string;
+  tags?: string[];
+
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Log entry tracking when a memory was recalled. */
+export interface MemoryAccessRecord {
+  id: string;
+  memoryId: string;
+  memoryKey: string;
+  accessedAt: string;
+  accessedBy?: string;
+  executionId?: ExecutionId;
+  taskId?: TaskId;
+}
+
+// ---------------------------------------------------------------------------
+// Work Handoffs
+// ---------------------------------------------------------------------------
+
+/** Record of a task being transferred between agents/roles. */
+export interface HandoffRecord {
+  id: string;
+  userId?: string;
+  taskId: TaskId;
+  fromAssignee: string;
+  toAssignee?: string;
+  toRole?: string;
+  reason: string;
+  contextSummary: string;
+  rejectedApproaches: string[];
+  timestamp: string;
+}
