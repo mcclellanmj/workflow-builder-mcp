@@ -940,15 +940,13 @@ export async function closeTask(
 
   // Check if parent task (epic) should auto-close when all children are closed
   if (task.parentTaskId) {
-    const siblings = await listTasks({ parentTaskId: task.parentTaskId }, { userId: uid });
-    const allSiblingsClosed = siblings.length > 0 &&
-      siblings.every((s) => s.status === "closed" || s.status === "wontfix");
-    if (allSiblingsClosed) {
+    const activeChildren = await listTasks({ parentTaskId: task.parentTaskId, userId: uid });
+    if (activeChildren.length === 0) {
       const parent = await getTask(task.parentTaskId, uid);
       if (parent && parent.status !== "closed" && parent.status !== "wontfix") {
         const parentCloseResult = await closeTask(
           parent.id,
-          `All child tasks completed (${siblings.length} tasks)`,
+          "All child tasks completed",
           uid,
         );
         for (const unblocked of parentCloseResult.unblockedTasks) {

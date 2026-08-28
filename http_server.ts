@@ -21,6 +21,7 @@ import {
   handleMcpRoutes,
   processJsonRpcMessage,
 } from "./routes/mcp_routes.ts";
+import { handleMemoryRoutes } from "./routes/memory_routes.ts";
 import { handleOAuthServerRoutes } from "./routes/oauth_server_routes.ts";
 import { handlePasskeyManagementRoutes } from "./routes/passkey_routes.ts";
 import { handleStaticRoutes } from "./routes/static_routes.ts";
@@ -89,7 +90,11 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
   const taskRes = await handleTaskRoutes(req, url, auth);
   if (taskRes) return taskRes;
 
-  // 10. Static / Discovery / Health / Profile Routes
+  // 10. Memory & Role Journal REST API Routes (/api/memories/*, /api/roles, /api/journals/*)
+  const memoryRes = await handleMemoryRoutes(req, url, auth);
+  if (memoryRes) return memoryRes;
+
+  // 11. Static / Discovery / Health / Profile Routes
   const staticRes = await handleStaticRoutes(req, url, auth);
   if (staticRes) return staticRes;
 

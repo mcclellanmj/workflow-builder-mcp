@@ -66,8 +66,10 @@ export function renderDashboardHtml(origin: string): string {
 <body>
   <div class="nav-bar">
     <a href="/" class="nav-btn nav-btn-primary">⚡ Dashboard</a>
-    <a href="/tasks" class="nav-btn">📋 Tasks Kanban Board</a>
-    <a href="/visualize" class="nav-btn">📊 Workflows Visualizer</a>
+    <a href="/tasks" class="nav-btn">📋 Tasks</a>
+    <a href="/memories" class="nav-btn">🧠 Memories</a>
+    <a href="/journals" class="nav-btn">📖 Role Journals</a>
+    <a href="/visualize" class="nav-btn">📊 Workflows</a>
   </div>
 
   <h1>🚀 Workflow MCP Remote Server <span class="badge badge-success">Passkey Auth</span></h1>
@@ -182,7 +184,10 @@ export function renderDashboardHtml(origin: string): string {
       <h2>📡 Available Endpoints & Interfaces</h2>
       <ul>
         <li><strong>Tasks Kanban Board UI</strong>: <code>GET ${origin}/tasks</code></li>
+        <li><strong>Memory Vault & Explorer UI</strong>: <code>GET ${origin}/memories</code></li>
+        <li><strong>Role Journals Web UI</strong>: <code>GET ${origin}/journals</code></li>
         <li><strong>Task REST API</strong>: <code>GET /api/tasks</code>, <code>GET /api/tasks/ready</code>, <code>POST /api/tasks/:id/comments</code></li>
+        <li><strong>Memory & Role REST API</strong>: <code>GET /api/memories</code>, <code>POST /api/memories</code>, <code>GET /api/roles</code>, <code>GET /api/journals/:role</code></li>
         <li><strong>Live SSR Visualizer</strong>: <code>GET ${origin}/visualize/:workflowId</code> (supports share tickets <code>?ticket=...</code>, 1 week default up to 1 year)</li>
         <li><strong>Stateless JSON-RPC MCP</strong>: <code>POST ${origin}/mcp</code></li>
         <li><strong>Health Probe</strong>: <code>GET ${origin}/health</code></li>

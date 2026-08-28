@@ -1,5 +1,6 @@
 /**
- * Server-Side Rendered & Interactive Single-Page Web Application for Task Kanban Board.
+ * Server-Side Rendered & Interactive Single-Page Web Application for Task Kanban Board,
+ * Memory Vault & Explorer, and Role Journals.
  * Built using standard Web APIs, HTML5, CSS3, and modern Vanilla JavaScript.
  */
 
@@ -9,18 +10,20 @@ export interface TaskUiOptions {
   origin: string;
   userId?: string;
   userName?: string;
+  initialTab?: "tasks" | "memories" | "journals";
 }
 
 export function renderTaskKanbanHtml(options: TaskUiOptions): string {
   const origin = options.origin.replace(/\/+$/, "");
   const userName = escapeHtml(options.userName || options.userId || "Guest");
+  const initialTab = options.initialTab || "tasks";
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Tasks Kanban Board — Workflow MCP</title>
+  <title>Tasks Board — Workflow MCP</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -47,6 +50,8 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       --purple-bg: rgba(168, 85, 247, 0.15);
       --cyan: #06b6d4;
       --cyan-bg: rgba(6, 182, 212, 0.15);
+      --amber: #f59e0b;
+      --amber-bg: rgba(245, 158, 11, 0.15);
       --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
     }
@@ -97,24 +102,48 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
     .header-nav {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
+    }
+    .nav-tab {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 7px 13px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.15s;
+      font-family: inherit;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+    .nav-tab:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .nav-tab.active {
+      color: #60a5fa;
+      background: rgba(59, 130, 246, 0.15);
+      border-color: rgba(59, 130, 246, 0.3);
     }
     .nav-link {
       color: var(--text-muted);
       text-decoration: none;
       font-size: 0.85rem;
       font-weight: 500;
-      padding: 6px 12px;
+      padding: 7px 12px;
       border-radius: 6px;
       transition: all 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }
     .nav-link:hover {
       color: var(--text);
       background: rgba(255, 255, 255, 0.05);
-    }
-    .nav-link.active {
-      color: #60a5fa;
-      background: rgba(59, 130, 246, 0.12);
     }
 
     /* Buttons */
@@ -164,9 +193,19 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       border-radius: 4px;
     }
 
+    /* Main View Containers */
+    .main-view {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+    .main-view.hidden {
+      display: none !important;
+    }
+
     /* Metrics & Controls Bar */
     .controls-bar {
-      padding: 16px 24px 8px 24px;
+      padding: 14px 24px;
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -176,7 +215,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
     .metrics-row {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
     }
     .metric-pill {
@@ -419,6 +458,250 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       color: var(--text-muted);
     }
 
+    /* Memory Vault Layout & Cards */
+    .memory-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 16px;
+      padding: 20px 24px;
+      align-items: start;
+    }
+    .memory-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: all 0.15s;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      cursor: pointer;
+    }
+    .memory-card:hover {
+      background: var(--bg-card-hover);
+      border-color: #334155;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+    }
+    .memory-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .memory-key {
+      font-family: var(--font-mono);
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #60a5fa;
+      word-break: break-all;
+    }
+    .scope-badge-workflow {
+      background: rgba(59, 130, 246, 0.2);
+      color: #60a5fa;
+    }
+    .scope-badge-node {
+      background: rgba(168, 85, 247, 0.2);
+      color: #c084fc;
+    }
+    .scope-badge-role {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+    }
+    .scope-badge-global {
+      background: rgba(148, 163, 184, 0.2);
+      color: #cbd5e1;
+    }
+    .memory-summary {
+      font-size: 0.84rem;
+      color: var(--text);
+      line-height: 1.4;
+    }
+    .memory-target-ref {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+    }
+    .tags-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .tag-chip {
+      font-size: 0.7rem;
+      background: #1e293b;
+      color: #94a3b8;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .memory-card-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+    .access-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: #34d399;
+      font-weight: 600;
+      font-size: 0.75rem;
+    }
+
+    /* Role Journals Layout & Cards */
+    .roles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 20px;
+      padding: 20px 24px;
+      align-items: start;
+    }
+    .role-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.15);
+    }
+    .role-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .role-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .role-desc {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+    .journal-box {
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .journal-box-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      padding-bottom: 6px;
+    }
+    .journal-entry-text {
+      font-size: 0.82rem;
+      color: #e2e8f0;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 160px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+    }
+    .role-card-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Context & Role Journal Section in Task Detail Modal */
+    .context-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .context-section-title {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #60a5fa;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .context-journal-card {
+      background: #090d16;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .context-journal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 6px;
+    }
+    .context-memories-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .context-mem-chip {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 10px;
+      cursor: pointer;
+      transition: all 0.15s;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.78rem;
+      color: var(--text);
+    }
+    .context-mem-chip:hover {
+      background: #334155;
+      border-color: #60a5fa;
+    }
+
+    /* Access Log Table */
+    .access-log-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      margin-top: 8px;
+    }
+    .access-log-table th, .access-log-table td {
+      padding: 6px 10px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .access-log-table th {
+      color: var(--text-muted);
+      font-weight: 600;
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .access-log-table tr:hover td {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
     /* Modal Dialog */
     .modal-backdrop {
       position: fixed;
@@ -625,6 +908,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       font-size: 0.82rem;
       border: 1px dashed var(--border);
       border-radius: 8px;
+      grid-column: 1 / -1;
     }
   </style>
 </head>
@@ -633,148 +917,249 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
   <header>
     <a href="/" class="brand">
       <span class="brand-logo">⚡</span>
-      <span class="brand-title">Tasks Board</span>
+      <span class="brand-title">Workflow MCP</span>
     </a>
     <div class="header-nav">
-      <a href="/tasks" class="nav-link active">📋 Tasks</a>
+      <button class="nav-tab ${initialTab === 'tasks' ? 'active' : ''}" id="tab-btn-tasks" onclick="switchMainTab('tasks')">
+        📋 Tasks
+      </button>
+      <button class="nav-tab ${initialTab === 'memories' ? 'active' : ''}" id="tab-btn-memories" onclick="switchMainTab('memories')">
+        🧠 Memories
+      </button>
+      <button class="nav-tab ${initialTab === 'journals' ? 'active' : ''}" id="tab-btn-journals" onclick="switchMainTab('journals')">
+        📖 Role Journals
+      </button>
       <a href="/visualize" class="nav-link">📊 Workflows</a>
-      <a href="/" class="nav-link">⚙️ Dashboard</a>
-      <button class="btn" onclick="openNewTaskModal()">
-        <span>➕</span> New Task
+      <a href="/" class="nav-link">⚡ Dashboard</a>
+      <button class="btn" id="headerActionBtn" onclick="handleHeaderAction()">
+        <span>➕</span> <span id="headerActionBtnText">New Task</span>
       </button>
     </div>
   </header>
 
-  <!-- Controls & Metrics -->
-  <div class="controls-bar">
-    <div class="metrics-row">
-      <div class="metric-pill">
-        <span>Total:</span>
-        <span class="metric-num" id="statTotal">0</span>
+  <!-- ======================== VIEW 1: TASKS KANBAN ======================== -->
+  <div id="tasksView" class="main-view ${initialTab !== 'tasks' ? 'hidden' : ''}">
+    <!-- Controls & Metrics -->
+    <div class="controls-bar">
+      <div class="metrics-row">
+        <div class="metric-pill">
+          <span>Total:</span>
+          <span class="metric-num" id="statTotal">0</span>
+        </div>
+        <div class="metric-pill">
+          <span style="color: #10b981;">⚡ Ready (Frontier):</span>
+          <span class="metric-num" id="statReady" style="color: #10b981;">0</span>
+        </div>
+        <div class="metric-pill">
+          <span style="color: #3b82f6;">🏃 In Progress:</span>
+          <span class="metric-num" id="statInProgress" style="color: #3b82f6;">0</span>
+        </div>
+        <div class="metric-pill">
+          <span style="color: #ef4444;">🛑 Blocked:</span>
+          <span class="metric-num" id="statBlocked" style="color: #ef4444;">0</span>
+        </div>
       </div>
-      <div class="metric-pill">
-        <span style="color: #10b981;">⚡ Ready (Frontier):</span>
-        <span class="metric-num" id="statReady" style="color: #10b981;">0</span>
+
+      <div class="filters-row">
+        <input type="text" id="searchInput" class="search-input" placeholder="🔍 Search tasks by title, ID, assignee, or role..." oninput="applyFilters()" />
+        
+        <select id="roleFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All Roles</option>
+        </select>
+
+        <select id="priorityFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All Priorities</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+
+        <select id="typeFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All Types</option>
+          <option value="task">Task</option>
+          <option value="epic">Epic</option>
+          <option value="subtask">Subtask</option>
+          <option value="bug">Bug</option>
+        </select>
+
+        <label class="toggle-label">
+          <input type="checkbox" id="readyOnlyToggle" onchange="applyFilters()" />
+          <span>⚡ Ready Only</span>
+        </label>
+
+        <button class="btn btn-secondary btn-sm" onclick="loadTasks(true)">
+          <span>🔄</span> Refresh
+        </button>
       </div>
-      <div class="metric-pill">
-        <span style="color: #3b82f6;">🏃 In Progress:</span>
-        <span class="metric-num" id="statInProgress" style="color: #3b82f6;">0</span>
-      </div>
-      <div class="metric-pill">
-        <span style="color: #ef4444;">🛑 Blocked:</span>
-        <span class="metric-num" id="statBlocked" style="color: #ef4444;">0</span>
-      </div>
-      <!-- Closed metric removed to reduce read overhead -->
     </div>
 
-    <div class="filters-row">
-      <input type="text" id="searchInput" class="search-input" placeholder="🔍 Search tasks by title, ID, assignee, or role..." oninput="applyFilters()" />
-      
-      <select id="roleFilter" class="filter-select" onchange="applyFilters()">
-        <option value="">All Roles</option>
-      </select>
+    <!-- Kanban Board Columns -->
+    <main class="kanban-board" id="kanbanBoard">
+      <!-- Open / Backlog -->
+      <div class="kanban-column" data-status="open">
+        <div class="column-header">
+          <div class="column-title-group">
+            <div class="column-dot" style="background: #94a3b8;"></div>
+            <span class="column-title">Open / Backlog</span>
+          </div>
+          <span class="column-count" id="count-open">0</span>
+        </div>
+        <div class="column-cards" id="lane-open" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'open')"></div>
+      </div>
 
-      <select id="priorityFilter" class="filter-select" onchange="applyFilters()">
-        <option value="">All Priorities</option>
-        <option value="critical">Critical</option>
-        <option value="high">High</option>
-        <option value="medium">Medium</option>
-        <option value="low">Low</option>
-      </select>
+      <!-- Claimed -->
+      <div class="kanban-column" data-status="claimed">
+        <div class="column-header">
+          <div class="column-title-group">
+            <div class="column-dot" style="background: #06b6d4;"></div>
+            <span class="column-title">Claimed</span>
+          </div>
+          <span class="column-count" id="count-claimed">0</span>
+        </div>
+        <div class="column-cards" id="lane-claimed" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'claimed')"></div>
+      </div>
 
-      <select id="typeFilter" class="filter-select" onchange="applyFilters()">
-        <option value="">All Types</option>
-        <option value="task">Task</option>
-        <option value="epic">Epic</option>
-        <option value="subtask">Subtask</option>
-        <option value="bug">Bug</option>
-      </select>
+      <!-- In Progress -->
+      <div class="kanban-column" data-status="in_progress">
+        <div class="column-header">
+          <div class="column-title-group">
+            <div class="column-dot" style="background: #3b82f6;"></div>
+            <span class="column-title">In Progress</span>
+          </div>
+          <span class="column-count" id="count-in_progress">0</span>
+        </div>
+        <div class="column-cards" id="lane-in_progress" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'in_progress')"></div>
+      </div>
 
-      <label class="toggle-label">
-        <input type="checkbox" id="readyOnlyToggle" onchange="applyFilters()" />
-        <span>⚡ Ready Only</span>
-      </label>
+      <!-- Blocked -->
+      <div class="kanban-column" data-status="blocked">
+        <div class="column-header">
+          <div class="column-title-group">
+            <div class="column-dot" style="background: #ef4444;"></div>
+            <span class="column-title">Blocked</span>
+          </div>
+          <span class="column-count" id="count-blocked">0</span>
+        </div>
+        <div class="column-cards" id="lane-blocked" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'blocked')"></div>
+      </div>
 
-      <button class="btn btn-secondary btn-sm" onclick="loadTasks(true)">
-        <span>🔄</span> Refresh
-      </button>
-    </div>
+      <!-- Review -->
+      <div class="kanban-column" data-status="review">
+        <div class="column-header">
+          <div class="column-title-group">
+            <div class="column-dot" style="background: #a855f7;"></div>
+            <span class="column-title">Review</span>
+          </div>
+          <span class="column-count" id="count-review">0</span>
+        </div>
+        <div class="column-cards" id="lane-review" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'review')"></div>
+      </div>
+
+      <!-- Closed -->
+      <div class="kanban-column" data-status="closed">
+        <div class="column-header">
+          <div class="column-title-group">
+            <div class="column-dot" style="background: #10b981;"></div>
+            <span class="column-title">Closed</span>
+          </div>
+          <span class="column-count" id="count-closed">0</span>
+        </div>
+        <div class="column-cards" id="lane-closed" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'closed')"></div>
+      </div>
+    </main>
   </div>
 
-  <!-- Kanban Board Columns -->
-  <main class="kanban-board" id="kanbanBoard">
-    <!-- Open / Backlog -->
-    <div class="kanban-column" data-status="open">
-      <div class="column-header">
-        <div class="column-title-group">
-          <div class="column-dot" style="background: #94a3b8;"></div>
-          <span class="column-title">Open / Backlog</span>
+  <!-- ======================== VIEW 2: MEMORY VAULT ======================== -->
+  <div id="memoriesView" class="main-view ${initialTab !== 'memories' ? 'hidden' : ''}">
+    <!-- Controls & Metrics -->
+    <div class="controls-bar">
+      <div class="metrics-row">
+        <div class="metric-pill">
+          <span>🧠 Total Memories:</span>
+          <span class="metric-num" id="memStatTotal">0</span>
         </div>
-        <span class="column-count" id="count-open">0</span>
+        <div class="metric-pill">
+          <span style="color: #60a5fa;">📊 Workflow Scope:</span>
+          <span class="metric-num" id="memStatWorkflow" style="color: #60a5fa;">0</span>
+        </div>
+        <div class="metric-pill">
+          <span style="color: #c084fc;">🧩 Node Scope:</span>
+          <span class="metric-num" id="memStatNode" style="color: #c084fc;">0</span>
+        </div>
+        <div class="metric-pill">
+          <span style="color: #fbbf24;">🏷️ Role Scope:</span>
+          <span class="metric-num" id="memStatRole" style="color: #fbbf24;">0</span>
+        </div>
+        <div class="metric-pill">
+          <span style="color: #34d399;">👁️ Total Recalls:</span>
+          <span class="metric-num" id="memStatAccessCount" style="color: #34d399;">0</span>
+        </div>
       </div>
-      <div class="column-cards" id="lane-open" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'open')"></div>
+
+      <div class="filters-row">
+        <input type="text" id="memSearchInput" class="search-input" placeholder="🔍 Search memories by key, summary, tag, or target..." oninput="renderMemoriesGrid()" />
+        
+        <select id="memScopeFilter" class="filter-select" onchange="renderMemoriesGrid()">
+          <option value="">All Scopes</option>
+          <option value="workflow">Workflow Scope</option>
+          <option value="node">Node Scope</option>
+          <option value="role">Role Scope</option>
+        </select>
+
+        <input type="text" id="memTagFilter" class="form-control" style="width: 180px; padding: 7px 12px; font-size: 0.85rem;" placeholder="🏷️ Filter by tag..." oninput="renderMemoriesGrid()" />
+
+        <button class="btn btn-secondary btn-sm" onclick="loadMemories(true)">
+          <span>🔄</span> Refresh
+        </button>
+
+        <button class="btn btn-sm" onclick="openNewMemoryModal()">
+          <span>➕</span> New Memory
+        </button>
+      </div>
     </div>
 
-    <!-- Claimed -->
-    <div class="kanban-column" data-status="claimed">
-      <div class="column-header">
-        <div class="column-title-group">
-          <div class="column-dot" style="background: #06b6d4;"></div>
-          <span class="column-title">Claimed</span>
+    <!-- Memories Grid -->
+    <main class="memory-grid" id="memoriesGrid">
+      <div class="empty-state">Loading Memory Vault...</div>
+    </main>
+  </div>
+
+  <!-- ======================== VIEW 3: ROLE JOURNALS ======================== -->
+  <div id="journalsView" class="main-view ${initialTab !== 'journals' ? 'hidden' : ''}">
+    <!-- Controls & Metrics -->
+    <div class="controls-bar">
+      <div class="metrics-row">
+        <div class="metric-pill">
+          <span>👥 Defined Roles:</span>
+          <span class="metric-num" id="journalStatRoles">0</span>
         </div>
-        <span class="column-count" id="count-claimed">0</span>
+        <div class="metric-pill">
+          <span style="color: #34d399;">📖 Active Journals:</span>
+          <span class="metric-num" id="journalStatEntries" style="color: #34d399;">0</span>
+        </div>
       </div>
-      <div class="column-cards" id="lane-claimed" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'claimed')"></div>
+
+      <div class="filters-row">
+        <input type="text" id="journalSearchInput" class="search-input" placeholder="🔍 Search roles and journal entries..." oninput="renderJournalsGrid()" />
+        
+        <button class="btn btn-secondary btn-sm" onclick="loadJournals(true)">
+          <span>🔄</span> Refresh
+        </button>
+
+        <button class="btn btn-sm" onclick="openNewRoleModal()">
+          <span>➕</span> New Role
+        </button>
+      </div>
     </div>
 
-    <!-- In Progress -->
-    <div class="kanban-column" data-status="in_progress">
-      <div class="column-header">
-        <div class="column-title-group">
-          <div class="column-dot" style="background: #3b82f6;"></div>
-          <span class="column-title">In Progress</span>
-        </div>
-        <span class="column-count" id="count-in_progress">0</span>
-      </div>
-      <div class="column-cards" id="lane-in_progress" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'in_progress')"></div>
-    </div>
+    <!-- Roles & Journals Grid -->
+    <main class="roles-grid" id="rolesGrid">
+      <div class="empty-state">Loading Role Journals...</div>
+    </main>
+  </div>
 
-    <!-- Blocked -->
-    <div class="kanban-column" data-status="blocked">
-      <div class="column-header">
-        <div class="column-title-group">
-          <div class="column-dot" style="background: #ef4444;"></div>
-          <span class="column-title">Blocked</span>
-        </div>
-        <span class="column-count" id="count-blocked">0</span>
-      </div>
-      <div class="column-cards" id="lane-blocked" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'blocked')"></div>
-    </div>
-
-    <!-- Review -->
-    <div class="kanban-column" data-status="review">
-      <div class="column-header">
-        <div class="column-title-group">
-          <div class="column-dot" style="background: #a855f7;"></div>
-          <span class="column-title">Review</span>
-        </div>
-        <span class="column-count" id="count-review">0</span>
-      </div>
-      <div class="column-cards" id="lane-review" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'review')"></div>
-    </div>
-
-    <!-- Closed -->
-    <div class="kanban-column" data-status="closed">
-      <div class="column-header">
-        <div class="column-title-group">
-          <div class="column-dot" style="background: #10b981;"></div>
-          <span class="column-title">Closed</span>
-        </div>
-        <span class="column-count" id="count-closed">0</span>
-      </div>
-      <div class="column-cards" id="lane-closed" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event, 'closed')"></div>
-    </div>
-  </main>
+  <!-- ======================== MODALS ======================== -->
 
   <!-- Task Detail Modal -->
   <div class="modal-backdrop" id="taskDetailModal" onclick="if(event.target===this) closeModal()">
@@ -803,6 +1188,26 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
           <div class="form-group">
             <label>Working Context & Notes</label>
             <textarea id="detailContext" class="form-control" rows="2" placeholder="Accumulated working notes, progress..."></textarea>
+          </div>
+
+          <!-- Context-Aware Role Journal & Memory Integration -->
+          <div class="context-section" id="taskContextSection">
+            <div class="context-section-title">
+              <span>🧠 Context & Role Journal</span>
+            </div>
+            
+            <!-- Inline Role Journal Snapshot -->
+            <div id="taskRoleJournalContainer">
+              <div style="color: var(--text-dim); font-size: 0.8rem;">Loading role journal...</div>
+            </div>
+
+            <!-- Scoped Matching Memories -->
+            <div style="margin-top: 10px;">
+              <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600; text-transform: uppercase; margin-bottom: 6px;">Relevant Memories:</div>
+              <div class="context-memories-list" id="taskMemoriesContainer">
+                <div style="color: var(--text-dim); font-size: 0.8rem;">No linked memories found.</div>
+              </div>
+            </div>
           </div>
 
           <div id="detailDependenciesContainer" style="margin-top: 14px; font-size: 0.82rem;">
@@ -875,7 +1280,12 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
 
           <div class="form-group">
             <label>Role</label>
-            <input type="text" id="detailRole" class="form-control" placeholder="e.g. frontend, backend" />
+            <input type="text" id="detailRole" class="form-control" placeholder="e.g. frontend, backend" onchange="refreshTaskContextDetails()" />
+          </div>
+
+          <div class="form-group">
+            <label>Workflow ID</label>
+            <input type="text" id="detailWorkflowId" class="form-control" placeholder="e.g. wf_123456" />
           </div>
 
           <div class="form-group">
@@ -962,6 +1372,180 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
     </div>
   </div>
 
+  <!-- Memory Detail & Recall Modal -->
+  <div class="modal-backdrop" id="memoryDetailModal" onclick="if(event.target===this) closeMemoryDetailModal()">
+    <div class="modal" style="max-width: 800px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span id="memDetailScopeBadge" class="badge scope-badge-workflow">WORKFLOW</span>
+          <span id="memDetailKey" class="memory-key" style="font-size: 1rem;">key_name</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="closeMemoryDetailModal()">✕</button>
+      </div>
+
+      <div class="modal-body" style="grid-template-columns: 1fr;">
+        <!-- Summary & Metadata Row -->
+        <div style="background: #090d16; border: 1px solid var(--border); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+          <div class="form-group" style="margin-bottom: 0;">
+            <label>Summary</label>
+            <input type="text" id="memDetailSummary" class="form-control" />
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; font-size: 0.78rem; color: var(--text-muted); margin-top: 4px;">
+            <div>Target: <code id="memDetailTarget" style="color: #93c5fd;">-</code></div>
+            <div>Accesses: <span id="memDetailAccessCount" class="access-chip">👁️ 0</span></div>
+            <div>Source: <span id="memDetailSource" style="color: var(--text);">-</span></div>
+            <div>Updated: <span id="memDetailUpdatedAt">-</span></div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0; margin-top: 4px;">
+            <label>Tags (Comma separated)</label>
+            <input type="text" id="memDetailTags" class="form-control" placeholder="tag1, tag2..." />
+          </div>
+        </div>
+
+        <!-- Content Viewer & Editor -->
+        <div class="form-group">
+          <label>Memory Content (Markdown / Text)</label>
+          <textarea id="memDetailContent" class="form-control" style="min-height: 160px; font-family: var(--font-mono); font-size: 0.84rem;"></textarea>
+        </div>
+
+        <!-- Access History Log Table -->
+        <div>
+          <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-muted); text-transform: uppercase;">👁️ Access & Recall History Log</label>
+          <div style="max-height: 140px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; margin-top: 4px;">
+            <table class="access-log-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Accessed By</th>
+                  <th>Task ID</th>
+                  <th>Execution ID</th>
+                </tr>
+              </thead>
+              <tbody id="memAccessLogBody">
+                <tr><td colspan="4" style="text-align: center; color: var(--text-dim);">No access logs recorded.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn btn-danger btn-sm" onclick="deleteCurrentMemory()">🗑️ Delete Memory</button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary" onclick="closeMemoryDetailModal()">Cancel</button>
+          <button class="btn" onclick="saveMemoryDetails()">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Memory Modal -->
+  <div class="modal-backdrop" id="newMemoryModal" onclick="if(event.target===this) closeNewMemoryModal()">
+    <div class="modal" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3 style="font-size: 1.05rem; font-weight: 700;">🧠 Save New Memory</h3>
+        <button class="btn btn-secondary btn-sm" onclick="closeNewMemoryModal()">✕</button>
+      </div>
+      <div class="modal-body" style="grid-template-columns: 1fr;">
+        <div class="form-group">
+          <label>Memory Key *</label>
+          <input type="text" id="newMemKey" class="form-control" placeholder="e.g. oauth_token_storage" required />
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div class="form-group">
+            <label>Scope *</label>
+            <select id="newMemScope" class="form-control" onchange="toggleScopeInputs()">
+              <option value="workflow" selected>Workflow</option>
+              <option value="node">Node</option>
+              <option value="role">Role</option>
+            </select>
+          </div>
+          <div class="form-group" id="scopeTargetGroup">
+            <label id="scopeTargetLabel">Workflow ID</label>
+            <input type="text" id="newMemTargetId" class="form-control" placeholder="e.g. wf_123456" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Summary *</label>
+          <input type="text" id="newMemSummary" class="form-control" placeholder="Short description of this memory..." required />
+        </div>
+
+        <div class="form-group">
+          <label>Tags (Comma-separated)</label>
+          <input type="text" id="newMemTags" class="form-control" placeholder="e.g. auth, security, architecture" />
+        </div>
+
+        <div class="form-group">
+          <label>Content (Full Details / Markdown) *</label>
+          <textarea id="newMemContent" class="form-control" style="min-height: 120px; font-family: var(--font-mono);" placeholder="Enter notes, knowledge, or specifications..." required></textarea>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="closeNewMemoryModal()">Cancel</button>
+        <button class="btn" onclick="submitNewMemory()">Save Memory</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Role Modal -->
+  <div class="modal-backdrop" id="newRoleModal" onclick="if(event.target===this) closeNewRoleModal()">
+    <div class="modal" style="max-width: 500px;">
+      <div class="modal-header">
+        <h3 style="font-size: 1.05rem; font-weight: 700;">➕ Define New Role</h3>
+        <button class="btn btn-secondary btn-sm" onclick="closeNewRoleModal()">✕</button>
+      </div>
+      <div class="modal-body" style="grid-template-columns: 1fr;">
+        <div class="form-group">
+          <label>Role Name *</label>
+          <input type="text" id="newRoleName" class="form-control" placeholder="e.g. backend, frontend, qa, devops" required />
+        </div>
+
+        <div class="form-group">
+          <label>Description</label>
+          <textarea id="newRoleDesc" class="form-control" placeholder="Responsibilities and scope for this role..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="closeNewRoleModal()">Cancel</button>
+        <button class="btn" onclick="submitNewRole()">Create Role</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Role Journal Modal -->
+  <div class="modal-backdrop" id="editJournalModal" onclick="if(event.target===this) closeEditJournalModal()">
+    <div class="modal" style="max-width: 650px;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="badge badge-epic">ROLE JOURNAL</span>
+          <h3 id="editJournalRoleTitle" style="font-size: 1.05rem; font-weight: 700;">frontend</h3>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="closeEditJournalModal()">✕</button>
+      </div>
+      <div class="modal-body" style="grid-template-columns: 1fr;">
+        <input type="hidden" id="editJournalRoleName" />
+
+        <div class="form-group">
+          <label>Written By (Author)</label>
+          <input type="text" id="editJournalAuthor" class="form-control" value="${userName}" />
+        </div>
+
+        <div class="form-group">
+          <label>Journal Entry (Markdown / Progress / Working Handoff)</label>
+          <textarea id="editJournalEntry" class="form-control" style="min-height: 180px; font-family: var(--font-mono);" placeholder="Record decisions, latest state, and instructions for incoming agents..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button class="btn btn-secondary" onclick="closeEditJournalModal()">Cancel</button>
+        <button class="btn" onclick="submitJournalUpdate()">Update Journal</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast Notification -->
   <div id="toast" class="toast">
     <span id="toastIcon">ℹ️</span>
@@ -970,10 +1554,18 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
 
   <script>
     const ORIGIN = "${origin}";
+    const CURRENT_USER = "${userName}";
+    let currentTab = "${initialTab}";
+
     let allTasks = [];
     let readyTaskIds = new Set();
     let currentTask = null;
     let draggedTaskId = null;
+
+    let allMemories = [];
+    let currentMemory = null;
+
+    let allRoles = [];
 
     function escapeHtml(str) {
       if (!str) return "";
@@ -999,6 +1591,60 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       }, 3500);
     }
 
+    /* =========================================================================
+       GLOBAL NAVIGATION & TAB SWITCHING
+       ========================================================================= */
+    function switchMainTab(tab, updateHistory = true) {
+      currentTab = tab;
+      
+      // Update nav buttons
+      document.querySelectorAll(".nav-tab").forEach(btn => btn.classList.remove("active"));
+      const activeBtn = document.getElementById("tab-btn-" + tab);
+      if (activeBtn) activeBtn.classList.add("active");
+
+      // Update header action button
+      const actionText = document.getElementById("headerActionBtnText");
+      if (tab === "tasks") actionText.textContent = "New Task";
+      else if (tab === "memories") actionText.textContent = "New Memory";
+      else if (tab === "journals") actionText.textContent = "New Role";
+
+      // Toggle views
+      document.querySelectorAll(".main-view").forEach(v => v.classList.add("hidden"));
+      const activeView = document.getElementById(tab + "View");
+      if (activeView) activeView.classList.remove("hidden");
+
+      if (updateHistory) {
+        window.history.pushState({ tab }, "", "/" + tab);
+      }
+
+      // Load view data
+      if (tab === "tasks") loadTasks();
+      else if (tab === "memories") loadMemories();
+      else if (tab === "journals") loadJournals();
+    }
+
+    function handleHeaderAction() {
+      if (currentTab === "tasks") openNewTaskModal();
+      else if (currentTab === "memories") openNewMemoryModal();
+      else if (currentTab === "journals") openNewRoleModal();
+    }
+
+    window.addEventListener("popstate", (e) => {
+      if (e.state && e.state.tab) {
+        switchMainTab(e.state.tab, false);
+      } else {
+        const path = window.location.pathname.replace(/^\\//, "");
+        if (path === "memories" || path === "journals" || path === "tasks") {
+          switchMainTab(path, false);
+        } else {
+          switchMainTab("tasks", false);
+        }
+      }
+    });
+
+    /* =========================================================================
+       1. TASKS KANBAN IMPLEMENTATION
+       ========================================================================= */
     async function loadTasks(showNotification = false) {
       try {
         const [tasksRes, readyRes] = await Promise.all([
@@ -1081,12 +1727,10 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
 
       const filtered = getFilteredTasks();
 
-      // Update metrics
       document.getElementById("statTotal").textContent = allTasks.length;
       document.getElementById("statReady").textContent = readyTaskIds.size;
       document.getElementById("statInProgress").textContent = allTasks.filter(t => t.status === "in_progress" || t.status === "claimed").length;
       document.getElementById("statBlocked").textContent = allTasks.filter(t => t.status === "blocked").length;
-      // statClosed metric removed; no DOM update needed
 
       filtered.forEach(task => {
         let laneKey = task.status || "open";
@@ -1097,7 +1741,6 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
         lanes[laneKey].appendChild(createTaskCard(task));
       });
 
-      // Render empty dropzone placeholder for empty lanes
       Object.keys(lanes).forEach(k => {
         if (counts[k] === 0) {
           const empty = document.createElement("div");
@@ -1107,7 +1750,6 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
         }
       });
 
-      // Update column count chips
       Object.keys(counts).forEach(k => {
         const el = document.getElementById("count-" + k);
         if (el) el.textContent = counts[k];
@@ -1162,7 +1804,6 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       return card;
     }
 
-    /* Drag & Drop Handlers */
     function handleDragOver(e) {
       e.preventDefault();
       e.currentTarget.classList.add("drag-over");
@@ -1181,7 +1822,6 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       const task = allTasks.find(t => t.id === taskId);
       if (!task || task.status === targetStatus) return;
 
-      // Optimistic update
       task.status = targetStatus;
       renderBoard();
 
@@ -1203,7 +1843,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       }
     }
 
-    /* Task Details Modal */
+    /* Task Details Modal & Context Integration */
     async function openTaskDetails(taskId) {
       try {
         const res = await fetch("/api/tasks/" + encodeURIComponent(taskId));
@@ -1222,6 +1862,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
         document.getElementById("detailType").value = currentTask.type || "task";
         document.getElementById("detailAssignee").value = currentTask.assignee || "";
         document.getElementById("detailRole").value = currentTask.role || "";
+        document.getElementById("detailWorkflowId").value = currentTask.workflowId || "";
         document.getElementById("detailParentTaskId").value = currentTask.parentTaskId || "";
         document.getElementById("detailCreatedAt").textContent = currentTask.createdAt ? new Date(currentTask.createdAt).toLocaleString() : "-";
         document.getElementById("detailUpdatedAt").textContent = currentTask.updatedAt ? new Date(currentTask.updatedAt).toLocaleString() : "-";
@@ -1229,10 +1870,90 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
         renderComments(currentTask.comments || []);
         renderDependencies(data.dependencies, data.children);
 
+        // Fetch and render context-aware Role Journal & Memories
+        loadTaskContextDetails(currentTask);
+
         document.getElementById("taskDetailModal").classList.add("open");
         resetCommentComposer();
       } catch (err) {
         showToast(err.message, true);
+      }
+    }
+
+    async function loadTaskContextDetails(task) {
+      const journalContainer = document.getElementById("taskRoleJournalContainer");
+      const memContainer = document.getElementById("taskMemoriesContainer");
+
+      // 1. Role Journal Snapshot
+      if (task.role) {
+        journalContainer.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8rem;">Loading journal for role "' + escapeHtml(task.role) + '"...</div>';
+        try {
+          const jRes = await fetch("/api/journals/" + encodeURIComponent(task.role));
+          if (jRes.ok) {
+            const jData = await jRes.json();
+            if (jData.journal && jData.journal.entry) {
+              journalContainer.innerHTML = \`
+                <div class="context-journal-card">
+                  <div class="context-journal-header">
+                    <span><strong>📖 Role Journal:</strong> \${escapeHtml(task.role)}</span>
+                    <span>👤 \${escapeHtml(jData.journal.writtenBy || "unknown")} • 🕒 \${new Date(jData.journal.updatedAt).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                  </div>
+                  <div class="journal-entry-text">\${escapeHtml(jData.journal.entry)}</div>
+                  <div style="margin-top: 8px;">
+                    <button class="btn btn-secondary btn-sm" onclick="openEditJournalModal('\${escapeHtml(task.role)}', '\${escapeHtml(jData.journal.entry).replace(/'/g, "\\\\'")}')">✏️ Update Role Journal</button>
+                  </div>
+                </div>
+              \`;
+            } else {
+              journalContainer.innerHTML = \`
+                <div class="context-journal-card" style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="font-size: 0.8rem; color: var(--text-dim);">No active journal entry for role "<strong>\${escapeHtml(task.role)}</strong>".</span>
+                  <button class="btn btn-secondary btn-sm" onclick="openEditJournalModal('\${escapeHtml(task.role)}', '')">📝 Write Entry</button>
+                </div>
+              \`;
+            }
+          } else {
+            journalContainer.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-dim);">No role journal found.</div>';
+          }
+        } catch (_) {
+          journalContainer.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-dim);">Could not load role journal.</div>';
+        }
+      } else {
+        journalContainer.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-dim);">Assign a <code>role</code> to view its working journal.</div>';
+      }
+
+      // 2. Scoped Memories
+      memContainer.innerHTML = '<div style="color: var(--text-dim); font-size: 0.8rem;">Searching relevant memories...</div>';
+      try {
+        const queryParams = new URLSearchParams();
+        if (task.role) queryParams.set("roleId", task.role);
+        if (task.workflowId) queryParams.set("workflowId", task.workflowId);
+
+        const mRes = await fetch("/api/memories?" + queryParams.toString());
+        if (mRes.ok) {
+          const mData = await mRes.json();
+          const memories = mData.memories || [];
+          if (memories.length > 0) {
+            memContainer.innerHTML = memories.map(m => \`
+              <div class="context-mem-chip" onclick="openMemoryDetailModal('\${m.id}', '\${task.id}')" title="\${escapeHtml(m.summary)}">
+                <span class="badge scope-badge-\${m.scope}">\${m.scope.toUpperCase()}</span>
+                <strong>\${escapeHtml(m.key)}</strong>
+                <span style="color: #34d399; font-size: 0.72rem;">👁️ \${m.accessCount || 0}</span>
+              </div>
+            \`).join("");
+          } else {
+            memContainer.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-dim);">No scoped memories found for this task.</div>';
+          }
+        }
+      } catch (_) {
+        memContainer.innerHTML = '<div style="font-size: 0.8rem; color: var(--text-dim);">Could not load memories.</div>';
+      }
+    }
+
+    function refreshTaskContextDetails() {
+      if (currentTask) {
+        currentTask.role = document.getElementById("detailRole").value.trim() || undefined;
+        loadTaskContextDetails(currentTask);
       }
     }
 
@@ -1365,6 +2086,7 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
         type: document.getElementById("detailType").value,
         assignee: document.getElementById("detailAssignee").value.trim() || undefined,
         role: document.getElementById("detailRole").value.trim() || undefined,
+        workflowId: document.getElementById("detailWorkflowId").value.trim() || undefined,
         parentTaskId: document.getElementById("detailParentTaskId").value.trim() || undefined
       };
 
@@ -1415,7 +2137,6 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       currentTask = null;
     }
 
-    /* New Task Modal */
     function openNewTaskModal() {
       document.getElementById("newTitle").value = "";
       document.getElementById("newDescription").value = "";
@@ -1470,11 +2191,498 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
       }
     }
 
-    // Keyboard Shortcuts (Esc closes modals, Ctrl+Enter posts comments)
+    /* =========================================================================
+       2. MEMORY VAULT & EXPLORER IMPLEMENTATION
+       ========================================================================= */
+    async function loadMemories(showNotification = false) {
+      try {
+        const res = await fetch("/api/memories");
+        if (!res.ok) throw new Error("Failed to load memories");
+        const data = await res.json();
+        allMemories = data.memories || [];
+
+        updateMemoryMetrics();
+        renderMemoriesGrid();
+        if (showNotification) showToast("Memory Vault refreshed");
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    function updateMemoryMetrics() {
+      document.getElementById("memStatTotal").textContent = allMemories.length;
+      document.getElementById("memStatWorkflow").textContent = allMemories.filter(m => m.scope === "workflow").length;
+      document.getElementById("memStatNode").textContent = allMemories.filter(m => m.scope === "node").length;
+      document.getElementById("memStatRole").textContent = allMemories.filter(m => m.scope === "role").length;
+
+      const totalAccess = allMemories.reduce((sum, m) => sum + (m.accessCount || 0), 0);
+      document.getElementById("memStatAccessCount").textContent = totalAccess;
+    }
+
+    function getFilteredMemories() {
+      const search = (document.getElementById("memSearchInput").value || "").toLowerCase().trim();
+      const scopeFilter = document.getElementById("memScopeFilter").value;
+      const tagFilter = (document.getElementById("memTagFilter").value || "").toLowerCase().trim();
+
+      return allMemories.filter(m => {
+        if (scopeFilter && m.scope !== scopeFilter) return false;
+
+        if (tagFilter) {
+          if (!m.tags || !m.tags.some(t => t.toLowerCase().includes(tagFilter))) {
+            return false;
+          }
+        }
+
+        if (search) {
+          const matchKey = (m.key || "").toLowerCase().includes(search);
+          const matchSummary = (m.summary || "").toLowerCase().includes(search);
+          const matchWorkflow = (m.workflowId || "").toLowerCase().includes(search);
+          const matchNode = (m.nodeId || "").toLowerCase().includes(search);
+          const matchRole = (m.roleId || "").toLowerCase().includes(search);
+          const matchTags = m.tags && m.tags.some(t => t.toLowerCase().includes(search));
+          if (!matchKey && !matchSummary && !matchWorkflow && !matchNode && !matchRole && !matchTags) {
+            return false;
+          }
+        }
+
+        return true;
+      });
+    }
+
+    function renderMemoriesGrid() {
+      const grid = document.getElementById("memoriesGrid");
+      const filtered = getFilteredMemories();
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '<div class="empty-state">No memories found in the vault.</div>';
+        return;
+      }
+
+      grid.innerHTML = filtered.map(m => {
+        const scopeBadgeClass = "scope-badge-" + (m.scope || "workflow");
+        const targetRef = m.scope === "workflow" ? ("Workflow: " + (m.workflowId || "global")) :
+                          (m.scope === "node" ? ("Node: " + (m.nodeId || "-") + " in " + (m.workflowId || "-")) :
+                          (m.scope === "role" ? ("Role: " + (m.roleId || "-")) : ""));
+
+        const tagsHtml = (m.tags && Array.isArray(m.tags) && m.tags.length > 0)
+          ? m.tags.map(t => '<span class="tag-chip">#' + escapeHtml(t) + '</span>').join("")
+          : "";
+
+        return \`
+          <div class="memory-card" onclick="openMemoryDetailModal('\${escapeHtml(m.id)}')">
+            <div class="memory-card-header">
+              <span class="badge \${scopeBadgeClass}">\${(m.scope || "workflow").toUpperCase()}</span>
+              <span class="access-chip">👁️ \${m.accessCount || 0} recalls</span>
+            </div>
+            <div class="memory-key">\${escapeHtml(m.key)}</div>
+            <div class="memory-summary">\${escapeHtml(m.summary)}</div>
+            \${targetRef ? '<div class="memory-target-ref">🎯 ' + escapeHtml(targetRef) + '</div>' : ''}
+            \${tagsHtml ? '<div class="tags-row">' + tagsHtml + '</div>' : ''}
+            <div class="memory-card-footer">
+              <span>Updated: \${m.updatedAt ? new Date(m.updatedAt).toLocaleDateString() : "-"}</span>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openMemoryDetailModal('\${escapeHtml(m.id)}')">Inspect</button>
+                <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteMemoryItem('\${escapeHtml(m.id)}')">🗑️</button>
+              </div>
+            </div>
+          </div>
+        \`;
+      }).join("");
+    }
+
+    async function openMemoryDetailModal(memoryId, taskId = "") {
+      try {
+        const query = taskId ? ("?taskId=" + encodeURIComponent(taskId) + "&accessedBy=" + encodeURIComponent(CURRENT_USER)) : "";
+        const [memRes, logRes] = await Promise.all([
+          fetch("/api/memories/" + encodeURIComponent(memoryId) + query),
+          fetch("/api/memories/" + encodeURIComponent(memoryId) + "/access-log")
+        ]);
+
+        if (!memRes.ok) throw new Error("Memory not found");
+        const memData = await memRes.json();
+        currentMemory = memData.memory;
+
+        const logData = logRes.ok ? await logRes.json() : { records: [] };
+
+        document.getElementById("memDetailKey").textContent = currentMemory.key;
+        document.getElementById("memDetailScopeBadge").textContent = (currentMemory.scope || "workflow").toUpperCase();
+        document.getElementById("memDetailScopeBadge").className = "badge scope-badge-" + (currentMemory.scope || "workflow");
+        document.getElementById("memDetailSummary").value = currentMemory.summary || "";
+        document.getElementById("memDetailTags").value = (currentMemory.tags || []).join(", ");
+        document.getElementById("memDetailContent").value = currentMemory.content || "";
+        
+        const target = currentMemory.scope === "workflow" ? ("Workflow: " + (currentMemory.workflowId || "global")) :
+                       (currentMemory.scope === "node" ? ("Node: " + (currentMemory.nodeId || "-") + " (" + (currentMemory.workflowId || "-") + ")") :
+                       (currentMemory.scope === "role" ? ("Role: " + (currentMemory.roleId || "-")) : "-"));
+        document.getElementById("memDetailTarget").textContent = target;
+        document.getElementById("memDetailAccessCount").textContent = "👁️ " + (currentMemory.accessCount || 0);
+        document.getElementById("memDetailSource").textContent = currentMemory.source || "manual";
+        document.getElementById("memDetailUpdatedAt").textContent = currentMemory.updatedAt ? new Date(currentMemory.updatedAt).toLocaleString() : "-";
+
+        // Render Access Log Table
+        const logBody = document.getElementById("memAccessLogBody");
+        const logs = logData.records || [];
+        if (logs.length === 0) {
+          logBody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-dim);">No access logs recorded.</td></tr>';
+        } else {
+          logBody.innerHTML = logs.map(l => \`
+            <tr>
+              <td>\${new Date(l.accessedAt).toLocaleString()}</td>
+              <td><span style="color: #60a5fa; font-weight: 500;">\${escapeHtml(l.accessedBy || "unknown")}</span></td>
+              <td>\${l.taskId ? ('<code>' + escapeHtml(l.taskId) + '</code>') : '-'}</td>
+              <td>\${l.executionId ? ('<code>' + escapeHtml(l.executionId) + '</code>') : '-'}</td>
+            </tr>
+          \`).join("");
+        }
+
+        document.getElementById("memoryDetailModal").classList.add("open");
+        loadMemories(); // Refresh access counters
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    function closeMemoryDetailModal() {
+      document.getElementById("memoryDetailModal").classList.remove("open");
+      currentMemory = null;
+    }
+
+    async function saveMemoryDetails() {
+      if (!currentMemory) return;
+
+      const summary = document.getElementById("memDetailSummary").value.trim();
+      const content = document.getElementById("memDetailContent").value.trim();
+      const tagsRaw = document.getElementById("memDetailTags").value.trim();
+      const tags = tagsRaw ? tagsRaw.split(",").map(t => t.trim()).filter(Boolean) : [];
+
+      if (!summary || !content) {
+        showToast("Summary and Content are required.", true);
+        return;
+      }
+
+      try {
+        const payload = {
+          key: currentMemory.key,
+          scope: currentMemory.scope,
+          workflowId: currentMemory.workflowId,
+          nodeId: currentMemory.nodeId,
+          roleId: currentMemory.roleId,
+          summary,
+          tags,
+          content
+        };
+
+        const res = await fetch("/api/memories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Failed to update memory");
+        }
+
+        showToast("Memory saved!");
+        closeMemoryDetailModal();
+        loadMemories();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    async function deleteCurrentMemory() {
+      if (!currentMemory) return;
+      deleteMemoryItem(currentMemory.id, true);
+    }
+
+    async function deleteMemoryItem(memoryId, closeDetailModal = false) {
+      if (!confirm("Are you sure you want to permanently delete this memory?")) return;
+
+      try {
+        const res = await fetch("/api/memories/" + encodeURIComponent(memoryId), {
+          method: "DELETE"
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Failed to delete memory");
+        }
+
+        showToast("Memory deleted");
+        if (closeDetailModal) closeMemoryDetailModal();
+        loadMemories();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    function openNewMemoryModal() {
+      document.getElementById("newMemKey").value = "";
+      document.getElementById("newMemScope").value = "workflow";
+      document.getElementById("newMemTargetId").value = "";
+      document.getElementById("newMemSummary").value = "";
+      document.getElementById("newMemTags").value = "";
+      document.getElementById("newMemContent").value = "";
+      toggleScopeInputs();
+      document.getElementById("newMemoryModal").classList.add("open");
+      setTimeout(() => document.getElementById("newMemKey").focus(), 50);
+    }
+
+    function closeNewMemoryModal() {
+      document.getElementById("newMemoryModal").classList.remove("open");
+    }
+
+    function toggleScopeInputs() {
+      const scope = document.getElementById("newMemScope").value;
+      const label = document.getElementById("scopeTargetLabel");
+      const input = document.getElementById("newMemTargetId");
+
+      if (scope === "workflow") {
+        label.textContent = "Workflow ID (Optional / Global)";
+        input.placeholder = "e.g. wf_123456";
+      } else if (scope === "node") {
+        label.textContent = "Node ID *";
+        input.placeholder = "e.g. step_oauth_verify";
+      } else if (scope === "role") {
+        label.textContent = "Role Name *";
+        input.placeholder = "e.g. frontend, backend";
+      }
+    }
+
+    async function submitNewMemory() {
+      const key = document.getElementById("newMemKey").value.trim();
+      const scope = document.getElementById("newMemScope").value;
+      const targetId = document.getElementById("newMemTargetId").value.trim();
+      const summary = document.getElementById("newMemSummary").value.trim();
+      const tagsRaw = document.getElementById("newMemTags").value.trim();
+      const content = document.getElementById("newMemContent").value.trim();
+
+      if (!key || !summary || !content) {
+        showToast("Key, summary, and content are required.", true);
+        return;
+      }
+
+      const tags = tagsRaw ? tagsRaw.split(",").map(t => t.trim()).filter(Boolean) : [];
+
+      const payload = {
+        key,
+        scope,
+        summary,
+        content,
+        tags,
+        workflowId: scope === "workflow" ? (targetId || undefined) : undefined,
+        nodeId: scope === "node" ? targetId : undefined,
+        roleId: scope === "role" ? targetId : undefined
+      };
+
+      try {
+        const res = await fetch("/api/memories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Failed to create memory");
+        }
+
+        showToast("Memory saved to Vault!");
+        closeNewMemoryModal();
+        loadMemories();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    /* =========================================================================
+       3. ROLE JOURNALS IMPLEMENTATION
+       ========================================================================= */
+    async function loadJournals(showNotification = false) {
+      try {
+        const res = await fetch("/api/roles");
+        if (!res.ok) throw new Error("Failed to load roles");
+        const data = await res.json();
+        allRoles = data.roles || [];
+
+        updateJournalMetrics();
+        renderJournalsGrid();
+        if (showNotification) showToast("Role Journals refreshed");
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    function updateJournalMetrics() {
+      document.getElementById("journalStatRoles").textContent = allRoles.length;
+      const activeJournals = allRoles.filter(r => r.journal && r.journal.entry).length;
+      document.getElementById("journalStatEntries").textContent = activeJournals;
+    }
+
+    function renderJournalsGrid() {
+      const grid = document.getElementById("rolesGrid");
+      const search = (document.getElementById("journalSearchInput").value || "").toLowerCase().trim();
+
+      const filtered = allRoles.filter(r => {
+        if (!search) return true;
+        const matchName = (r.name || "").toLowerCase().includes(search);
+        const matchDesc = (r.description || "").toLowerCase().includes(search);
+        const matchJournal = r.journal && (r.journal.entry || "").toLowerCase().includes(search);
+        return matchName || matchDesc || matchJournal;
+      });
+
+      if (filtered.length === 0) {
+        grid.innerHTML = '<div class="empty-state">No roles found. Click "+ New Role" to create one.</div>';
+        return;
+      }
+
+      grid.innerHTML = filtered.map(r => {
+        const hasJournal = r.journal && r.journal.entry;
+        const journalHtml = hasJournal ? \`
+          <div class="journal-box">
+            <div class="journal-box-header">
+              <span>👤 <strong>\${escapeHtml(r.journal.writtenBy || "unknown")}</strong></span>
+              <span>🕒 \${new Date(r.journal.updatedAt).toLocaleString()}</span>
+            </div>
+            <div class="journal-entry-text">\${escapeHtml(r.journal.entry)}</div>
+          </div>
+        \` : \`
+          <div class="journal-box" style="text-align: center; color: var(--text-dim); padding: 20px 10px;">
+            No journal snapshot recorded yet for this role.
+          </div>
+        \`;
+
+        return \`
+          <div class="role-card">
+            <div class="role-card-header">
+              <div class="role-name">
+                <span>🏷️</span>
+                <span>\${escapeHtml(r.name)}</span>
+              </div>
+              <span class="badge badge-epic">ROLE</span>
+            </div>
+
+            \${r.description ? '<div class="role-desc">' + escapeHtml(r.description) + '</div>' : ''}
+
+            \${journalHtml}
+
+            <div class="role-card-actions">
+              <button class="btn btn-secondary btn-sm" onclick="viewRoleTasks('\${escapeHtml(r.name)}')">
+                📋 View Role Tasks
+              </button>
+              <button class="btn btn-sm" onclick="openEditJournalModal('\${escapeHtml(r.name)}', '\${hasJournal ? escapeHtml(r.journal.entry).replace(/'/g, "\\\\'") : ""}')">
+                \${hasJournal ? '✏️ Update Journal' : '📝 Write Journal'}
+              </button>
+            </div>
+          </div>
+        \`;
+      }).join("");
+    }
+
+    function viewRoleTasks(roleName) {
+      switchMainTab("tasks");
+      const select = document.getElementById("roleFilter");
+      select.value = roleName;
+      applyFilters();
+    }
+
+    function openNewRoleModal() {
+      document.getElementById("newRoleName").value = "";
+      document.getElementById("newRoleDesc").value = "";
+      document.getElementById("newRoleModal").classList.add("open");
+      setTimeout(() => document.getElementById("newRoleName").focus(), 50);
+    }
+
+    function closeNewRoleModal() {
+      document.getElementById("newRoleModal").classList.remove("open");
+    }
+
+    async function submitNewRole() {
+      const name = document.getElementById("newRoleName").value.trim();
+      const description = document.getElementById("newRoleDesc").value.trim();
+
+      if (!name) {
+        showToast("Role name is required", true);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/roles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, description: description || undefined })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Failed to create role");
+        }
+
+        showToast("Role created: " + name);
+        closeNewRoleModal();
+        loadJournals();
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    function openEditJournalModal(roleName, currentEntry = "") {
+      document.getElementById("editJournalRoleName").value = roleName;
+      document.getElementById("editJournalRoleTitle").textContent = roleName;
+      document.getElementById("editJournalAuthor").value = CURRENT_USER;
+      document.getElementById("editJournalEntry").value = currentEntry;
+      document.getElementById("editJournalModal").classList.add("open");
+      setTimeout(() => document.getElementById("editJournalEntry").focus(), 50);
+    }
+
+    function closeEditJournalModal() {
+      document.getElementById("editJournalModal").classList.remove("open");
+    }
+
+    async function submitJournalUpdate() {
+      const roleName = document.getElementById("editJournalRoleName").value;
+      const writtenBy = document.getElementById("editJournalAuthor").value.trim() || CURRENT_USER;
+      const entry = document.getElementById("editJournalEntry").value.trim();
+
+      if (!entry) {
+        showToast("Journal entry content is required.", true);
+        return;
+      }
+
+      try {
+        const res = await fetch("/api/journals/" + encodeURIComponent(roleName), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entry, writtenBy })
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.error || "Failed to update journal");
+        }
+
+        showToast("Journal updated for role " + roleName);
+        closeEditJournalModal();
+        loadJournals();
+
+        if (currentTask && currentTask.role === roleName) {
+          loadTaskContextDetails(currentTask);
+        }
+      } catch (err) {
+        showToast(err.message, true);
+      }
+    }
+
+    /* Keyboard Shortcuts */
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         closeModal();
         closeNewTaskModal();
+        closeMemoryDetailModal();
+        closeNewMemoryModal();
+        closeNewRoleModal();
+        closeEditJournalModal();
       }
     });
 
@@ -1486,8 +2694,15 @@ export function renderTaskKanbanHtml(options: TaskUiOptions): string {
     });
 
     // Initial load
-    loadTasks();
+    if (currentTab === "memories") {
+      loadMemories();
+    } else if (currentTab === "journals") {
+      loadJournals();
+    } else {
+      loadTasks();
+    }
   </script>
 </body>
 </html>`;
 }
+

@@ -28,12 +28,14 @@ export async function handleTaskRoutes(
   const path = url.pathname;
   const method = req.method.toUpperCase();
 
-  // 1. Web UI: GET /tasks
-  if (path === "/tasks" && method === "GET") {
+  // 1. Web UI: GET /tasks, GET /memories, GET /journals
+  if ((path === "/tasks" || path === "/memories" || path === "/journals") && method === "GET") {
+    const initialTab = path === "/memories" ? "memories" : (path === "/journals" ? "journals" : "tasks");
     const html = renderTaskKanbanHtml({
       origin: url.origin,
       userId: auth?.userId,
       userName: auth?.user?.name || auth?.userId,
+      initialTab,
     });
 
     return new Response(html, {

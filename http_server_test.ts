@@ -648,3 +648,325 @@ Deno.test("HTTP Server - Task Kanban Web UI and REST API Lifecycle", async () =>
     kv.close();
   }
 });
+
+Deno.test("HTTP Server - Memory and Role Journal REST API Lifecycle", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const userId = "user_http_memories";
+    const tokenInfo = await createApiToken(userId, "Memory Test Token");
+    const authHeaders = {
+      "Authorization": `Bearer ${tokenInfo.token}`,
+      "Content-Type": "application/json",
+    };
+
+    // 1. POST /api/memories - Create workflow-scoped memory
+    const createMemRes1 = await handleHttpRequest(
+      new Request("http://localhost:8000/api/memories", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          key: "auth-strategy",
+          summary: "OAuth2 with PKCE",
+          content: "Use RFC 7636 PKCE for public clients",
+          scope: "workflow",
+          workflowId: "wf-main",
+          tags: ["auth", "security"],
+        }),
+      }),
+    );
+    assertEquals(createMemRes1.status, 201);
+    const createMemData1 = await createMemRes1.json();
+    assertEquals(createMemData1.created, true);
+    const mem1 = createMemData1.memory;
+    assert(mem1.id.startsWith("mem-"));
+    assertEquals(mem1.key, "auth-strategy");
+    assertEquals(mem1.summary, "OAuth2 with PKCE");
+    assertEquals(mem1.accessCount, 0);
+
+    // 2. POST /api/memories - Upsert existing memory
+    const updateMemRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/memories", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          key: "auth-strategy",
+          summary: "OAuth2 with PKCE & WebAuthn",
+          content: "Use RFC 7636 PKCE and Passkeys",
+          scope: "workflow",
+          workflowId: "wf-main",
+          tags: ["auth", "security", "passkey"],
+        }),
+      }),
+    );
+    assertEquals(updateMemRes.status, 200);
+    const updateMemData = await updateMemRes.json();
+    assertEquals(updateMemData.created, false);
+    assertEquals(updateMemData.memory.id, mem1.id);
+    assertEquals(updateMemData.memory.summary, "OAuth2 with PKCE & WebAuthn");
+
+    // 3. POST /api/memories - Create role-scoped memory
+    const createMemRes2 = await handleHttpRequest(
+      new Request("http://localhost:8000/api/memories", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          key: "guidelines",
+          summary: "Architecture best practices",
+          content: "Always separate domain logic from routing",
+          scope: "role",
+          roleId: "architect",
+          tags: ["architecture"],
+        }),
+      }),
+    );
+    assertEquals(createMemRes2.status, 201);
+    const mem2 = (await createMemRes2.json()).memory;
+
+    // 4. GET /api/memories - List all memories
+    const listRes1 = await handleHttpRequest(
+      new Request("http://localhost:8000/api/memories", {
+        method: "GET",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(listRes1.status, 200);
+    const listData1 = await listRes1.json();
+    assertEquals(listData1.count, 2);
+
+    // 5. GET /api/memories with filters (scope, workflowId, tags)
+    const listRes2 = await handleHttpRequest(
+      new Request("http://localhost:8000/api/memories?scope=workflow&workflowId=wf-main&tags=passkey", {
+        method: "GET",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(listRes2.status, 200);
+    const listData2 = await listRes2.json();
+    assertEquals(listData2.count, 1);
+    assertEquals(listData2.memories[0].id, mem1.id);
+
+    // 6. GET /api/memories/:id - Recall memory (access log recorded)
+    const recallRes = await handleHttpRequest(
+      new Request(`http://localhost:8000/api/memories/${mem1.id}?taskId=tk-123&executionId=ex-456`, {
+        method: "GET",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(recallRes.status, 200);
+    const recallData = await recallRes.json();
+    assertEquals(recallData.memory.id, mem1.id);
+    assertEquals(recallData.memory.accessCount, 1);
+    assert(recallData.memory.lastAccessed);
+
+    // 7. GET /api/memories/:id/access-log - Retrieve access logs
+    const accessLogRes = await handleHttpRequest(
+      new Request(`http://localhost:8000/api/memories/${mem1.id}/access-log`, {
+        method: "GET",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(accessLogRes.status, 200);
+    const accessLogData = await accessLogRes.json();
+    assertEquals(accessLogData.count, 1);
+    assertEquals(accessLogData.records[0].memoryId, mem1.id);
+    assertEquals(accessLogData.records[0].taskId, "tk-123");
+    assertEquals(accessLogData.records[0].executionId, "ex-456");
+
+    // 8. GET /api/memories/invalid-id - 404
+    const notFoundMemRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/memories/mem-nonexistent", {
+        method: "GET",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(notFoundMemRes.status, 404);
+
+    // 9. DELETE /api/memories/:id - Delete memory
+    const delMemRes = await handleHttpRequest(
+      new Request(`http://localhost:8000/api/memories/${mem1.id}`, {
+        method: "DELETE",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(delMemRes.status, 200);
+    const delMemData = await delMemRes.json();
+    assertEquals(delMemData.success, true);
+    assertEquals(delMemData.deleted, true);
+    assertEquals(delMemData.accessCount, 1);
+
+    // Verify deleted memory is gone
+    const getDeletedRes = await handleHttpRequest(
+      new Request(`http://localhost:8000/api/memories/${mem1.id}`, {
+        method: "GET",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(getDeletedRes.status, 404);
+
+    // 10. POST /api/roles - Create role
+    const createRoleRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          name: "developer",
+          description: "Fullstack TypeScript developer",
+        }),
+      }),
+    );
+    assertEquals(createRoleRes.status, 201);
+    const createRoleData = await createRoleRes.json();
+    assertEquals(createRoleData.role.name, "developer");
+    assertEquals(createRoleData.role.description, "Fullstack TypeScript developer");
+
+    // 11. POST /api/journals/:role - Write journal entry
+    const writeJournalRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/journals/developer", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          entry: "Implemented Memory & Role Journal REST API routes",
+          writtenBy: "developer-agent-1",
+        }),
+      }),
+    );
+    assertEquals(writeJournalRes.status, 200);
+    const writeJournalData = await writeJournalRes.json();
+    assertEquals(writeJournalData.journal.roleId, "developer");
+    assertEquals(writeJournalData.journal.entry, "Implemented Memory & Role Journal REST API routes");
+    assertEquals(writeJournalData.journal.writtenBy, "developer-agent-1");
+
+    // 12. GET /api/journals/:role - Read latest journal
+    const readJournalRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/journals/developer", {
+        method: "GET",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(readJournalRes.status, 200);
+    const readJournalData = await readJournalRes.json();
+    assertEquals(readJournalData.journal.roleId, "developer");
+    assertEquals(readJournalData.journal.entry, "Implemented Memory & Role Journal REST API routes");
+
+    // 13. GET /api/roles - List roles enriched with latest journal
+    const listRolesRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "GET",
+        headers: authHeaders,
+      }),
+    );
+    assertEquals(listRolesRes.status, 200);
+    const listRolesData = await listRolesRes.json();
+    assert(listRolesData.count >= 1);
+    const devRole = listRolesData.roles.find((r: { name: string }) => r.name === "developer");
+    assert(devRole);
+    assertEquals(devRole.journal.entry, "Implemented Memory & Role Journal REST API routes");
+
+    // 14. Multi-tenant isolation test: User B cannot see User A's memories, roles, or journals
+    const userBToken = await createApiToken("user_other_tenant", "User B Token");
+    const userBHeaders = {
+      "Authorization": `Bearer ${userBToken.token}`,
+      "Content-Type": "application/json",
+    };
+
+    const userBMemList = await handleHttpRequest(
+      new Request("http://localhost:8000/api/memories", {
+        method: "GET",
+        headers: userBHeaders,
+      }),
+    );
+    assertEquals(userBMemList.status, 200);
+    assertEquals((await userBMemList.json()).count, 0);
+
+    const userBRecall = await handleHttpRequest(
+      new Request(`http://localhost:8000/api/memories/${mem2.id}`, {
+        method: "GET",
+        headers: userBHeaders,
+      }),
+    );
+    assertEquals(userBRecall.status, 404);
+
+    const userBRolesList = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "GET",
+        headers: userBHeaders,
+      }),
+    );
+    assertEquals(userBRolesList.status, 200);
+    assertEquals((await userBRolesList.json()).count, 0);
+
+    const userBJournal = await handleHttpRequest(
+      new Request("http://localhost:8000/api/journals/developer", {
+        method: "GET",
+        headers: userBHeaders,
+      }),
+    );
+    assertEquals(userBJournal.status, 200);
+    assertEquals((await userBJournal.json()).journal, null);
+  } finally {
+    kv.close();
+  }
+});
+
+Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboard Navigation", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    // 1. GET /tasks UI
+    const tasksRes = await handleHttpRequest(
+      new Request("http://localhost:8000/tasks", { method: "GET" }),
+    );
+    assertEquals(tasksRes.status, 200);
+    assertEquals(tasksRes.headers.get("content-type"), "text/html; charset=utf-8");
+    const tasksHtml = await tasksRes.text();
+    assert(tasksHtml.includes("Workflow MCP"));
+    assert(tasksHtml.includes('id="tasksView"'));
+    assert(tasksHtml.includes('id="memoriesView"'));
+    assert(tasksHtml.includes('id="journalsView"'));
+    assert(tasksHtml.includes('id="tab-btn-tasks"'));
+    assert(tasksHtml.includes('class="nav-tab active" id="tab-btn-tasks"'));
+    assert(tasksHtml.includes('switchMainTab'));
+
+    // 2. GET /memories UI
+    const memRes = await handleHttpRequest(
+      new Request("http://localhost:8000/memories", { method: "GET" }),
+    );
+    assertEquals(memRes.status, 200);
+    assertEquals(memRes.headers.get("content-type"), "text/html; charset=utf-8");
+    const memHtml = await memRes.text();
+    assert(memHtml.includes('class="nav-tab active" id="tab-btn-memories"'));
+    assert(memHtml.includes('id="memoriesGrid"'));
+    assert(memHtml.includes('id="memStatTotal"'));
+    assert(memHtml.includes('id="memoryDetailModal"'));
+
+    // 3. GET /journals UI
+    const journalRes = await handleHttpRequest(
+      new Request("http://localhost:8000/journals", { method: "GET" }),
+    );
+    assertEquals(journalRes.status, 200);
+    assertEquals(journalRes.headers.get("content-type"), "text/html; charset=utf-8");
+    const journalHtml = await journalRes.text();
+    assert(journalHtml.includes('class="nav-tab active" id="tab-btn-journals"'));
+    assert(journalHtml.includes('id="rolesGrid"'));
+    assert(journalHtml.includes('id="editJournalModal"'));
+
+    // 4. GET / Dashboard Navigation & Endpoints List
+    const dashRes = await handleHttpRequest(
+      new Request("http://localhost:8000/", { method: "GET" }),
+    );
+    assertEquals(dashRes.status, 200);
+    const dashHtml = await dashRes.text();
+    assert(dashHtml.includes('href="/tasks"'));
+    assert(dashHtml.includes('href="/memories"'));
+    assert(dashHtml.includes('href="/journals"'));
+    assert(dashHtml.includes("Memory Vault & Explorer UI"));
+    assert(dashHtml.includes("Role Journals Web UI"));
+  } finally {
+    kv.close();
+  }
+});
+
+
