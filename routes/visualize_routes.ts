@@ -16,7 +16,9 @@ import type { ViewTicket } from "../store/types.ts";
 import { hydrateNodesWithExecution } from "../mcp/helpers.ts";
 import { CORS_HEADERS, errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
 
-export const revokedTickets = new Set<string>();
+export const revokedTickets = new Set<string>([
+  "7b5c86c68aeb4ee7a8c5b24682d98c8f",
+]);
 
 export function revokeTicket(ticketId: string): void {
   revokedTickets.add(ticketId.trim());
