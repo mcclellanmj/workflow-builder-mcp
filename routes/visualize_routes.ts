@@ -2,13 +2,25 @@
  * Server-Side Rendered (SSR) Visualization and Share Ticket HTTP Route Handlers.
  */
 
+import { safeGetEnv } from "../env.ts";
 import { authenticateRequest } from "../auth/oauth.ts";
 import type { AuthResult } from "../auth/oauth.ts";
 import { generateSsrVisualizerHtml } from "../mcp/ssr_visualizer.ts";
-import { exportWorkflowBundle, getExecution, getViewTicket } from "../store/kv.ts";
+import {
+  deleteViewTicket,
+  exportWorkflowBundle,
+  getExecution,
+  getViewTicket,
+} from "../store/kv.ts";
 import type { ViewTicket } from "../store/types.ts";
 import { hydrateNodesWithExecution } from "../mcp/helpers.ts";
 import { CORS_HEADERS, errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
+
+export const revokedTickets = new Set<string>();
+
+export function revokeTicket(ticketId: string): void {
+  revokedTickets.add(ticketId.trim());
+}
 
 function renderExpiredTicketHtml(origin: string): string {
   return `<!DOCTYPE html>
@@ -129,12 +141,24 @@ export async function handleVisualizeRoutes(
   const path = url.pathname;
   const method = req.method.toUpperCase();
 
-  // Match /visualize/:workflowId, /visualize/view/:ticketId, or /visualize
+  // Match /visualize/:workflowId, /visualize/view/:ticketId, /visualize, or /api/visualize/tickets/:ticketId
   const isVisualizePage = path === "/visualize" || path.startsWith("/visualize/");
   const isApiData = path.startsWith("/api/visualize/") && path.endsWith("/data");
+  const isTicketManagement = path.startsWith("/api/visualize/tickets/");
 
-  if (!isVisualizePage && !isApiData) {
+  if (!isVisualizePage && !isApiData && !isTicketManagement) {
     return null;
+  }
+
+  // DELETE /api/visualize/tickets/:ticketId - Revoke and delete ticket
+  if (isTicketManagement && method === "DELETE") {
+    const ticketToDelete = path.replace("/api/visualize/tickets/", "").trim();
+    if (!ticketToDelete) {
+      return errorResponse("Ticket ID is required.", 400);
+    }
+    revokeTicket(ticketToDelete);
+    await deleteViewTicket(ticketToDelete);
+    return jsonResponse({ success: true, message: `Ticket "${ticketToDelete}" has been revoked.` });
   }
 
   if (method !== "GET") {
@@ -150,6 +174,23 @@ export async function handleVisualizeRoutes(
     workflowId = path.replace("/api/visualize/", "").replace(/\/data$/, "");
   } else if (path.startsWith("/visualize/")) {
     workflowId = path.replace("/visualize/", "").split("/")[0];
+  }
+
+  // Fast revocation check before any KV lookup
+  if (ticketId) {
+    const disabledEnv = safeGetEnv("DISABLED_TICKETS") || safeGetEnv("REVOKED_TICKETS") || "";
+    const isRevoked = revokedTickets.has(ticketId) ||
+      disabledEnv.split(",").map((t) => t.trim()).filter(Boolean).includes(ticketId);
+
+    if (isRevoked) {
+      if (isApiData) {
+        return errorResponse("Ticket has been revoked.", 403);
+      }
+      return new Response(renderExpiredTicketHtml(url.origin), {
+        status: 403,
+        headers: { "content-type": "text/html; charset=utf-8", ...CORS_HEADERS },
+      });
+    }
   }
 
   if (!workflowId && url.searchParams.has("workflowId")) {
@@ -180,12 +221,12 @@ export async function handleVisualizeRoutes(
       activeExecutionId = ticket.executionId;
     }
   } else {
-    // 2. Resolve authentication via standard user session or token
+    // 2. Direct access without ticket requires user authentication
     const effectiveAuth = auth || (await authenticateRequest(req));
     if (!effectiveAuth) {
       if (isApiData) {
         return errorResponse(
-          "Unauthorized. Provide token or ticket.",
+          "Unauthorized. Please log in or provide Bearer token.",
           401,
           getWwwAuthenticateHeader(url.origin),
         );
