@@ -987,15 +987,33 @@ export async function computeReadyFrontier(
     candidateTasks = candidateTasks.filter((t) => t.type && allowed.includes(t.type));
   }
 
-  // 2. Fetch inbound dependencies for all candidate tasks in parallel
-  const candidateDeps = await Promise.all(
-    candidateTasks.map((task) => getDependencies(task.id, "blocked-by", uid)),
-  );
+  if (candidateTasks.length === 0) {
+    return [];
+  }
+
+  const kv = await getKv();
+
+  // 2. Fetch all inbound dependencies in a single batch prefix query and group by toTaskId in memory
+  const inboundDepsByTarget = new Map<TaskId, TaskDependency[]>();
+  for await (
+    const entry of kv.list<TaskDependency>({ prefix: ["users", uid, "task_deps_rev"] })
+  ) {
+    if (entry.value) {
+      const targetId = entry.value.toTaskId;
+      let deps = inboundDepsByTarget.get(targetId);
+      if (!deps) {
+        deps = [];
+        inboundDepsByTarget.set(targetId, deps);
+      }
+      deps.push(entry.value);
+    }
+  }
 
   // 3. Deduplicate all required blocker task IDs (dep.fromTaskId) across all candidates
   const blockerIdsSet = new Set<TaskId>();
-  for (const deps of candidateDeps) {
-    for (const dep of deps) {
+  for (const task of candidateTasks) {
+    const inboundDeps = inboundDepsByTarget.get(task.id) ?? [];
+    for (const dep of inboundDeps) {
       if (dep.type === "blocks" || dep.type === "waits-for") {
         blockerIdsSet.add(dep.fromTaskId);
       }
@@ -1003,7 +1021,6 @@ export async function computeReadyFrontier(
   }
 
   // 4. Batch fetch all blocker tasks using kv.getMany (via fetchTasksByIds) and construct map
-  const kv = await getKv();
   const blockerTasks = blockerIdsSet.size > 0
     ? await fetchTasksByIds(kv, uid, Array.from(blockerIdsSet))
     : [];
@@ -1015,9 +1032,8 @@ export async function computeReadyFrontier(
   // 5. Evaluate blocker status in-memory with zero extra KV round-trips
   const readyTasks: Task[] = [];
 
-  for (let i = 0; i < candidateTasks.length; i++) {
-    const task = candidateTasks[i];
-    const inboundDeps = candidateDeps[i];
+  for (const task of candidateTasks) {
+    const inboundDeps = inboundDepsByTarget.get(task.id) ?? [];
     let isBlocked = false;
 
     for (const dep of inboundDeps) {

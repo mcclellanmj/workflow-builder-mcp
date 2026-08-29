@@ -780,14 +780,61 @@ Deno.test("Multi-Tenant User Isolation - Memories, Roles, and Journals Separatio
   }
 });
 
-Deno.test("Web UI Routes - HTML Rendering and Context / Role Journal Elements (/memories, /journals, /tasks)", async () => {
+Deno.test("Web UI Routes & Auth Guard - Redirects and HTML Rendering (/memories, /journals, /tasks)", async () => {
   const kv = await Deno.openKv(":memory:");
   setKv(kv);
 
   try {
-    // 1. GET /memories - Memory Vault & Explorer UI
-    const memUiRes = await handleHttpRequest(
+    // 1. Unauthenticated requests to UI routes should redirect (302) to / with redirect query param
+    const unauthMemRes = await handleHttpRequest(
       new Request("http://localhost:8000/memories", { method: "GET" }),
+    );
+    assertEquals(unauthMemRes.status, 302);
+    assertEquals(unauthMemRes.headers.get("location"), "/?redirect=%2Fmemories");
+
+    const unauthJournalRes = await handleHttpRequest(
+      new Request("http://localhost:8000/journals", { method: "GET" }),
+    );
+    assertEquals(unauthJournalRes.status, 302);
+    assertEquals(unauthJournalRes.headers.get("location"), "/?redirect=%2Fjournals");
+
+    const unauthTasksRes = await handleHttpRequest(
+      new Request("http://localhost:8000/tasks", { method: "GET" }),
+    );
+    assertEquals(unauthTasksRes.status, 302);
+    assertEquals(unauthTasksRes.headers.get("location"), "/?redirect=%2Ftasks");
+
+    // 2. Unauthenticated REST API requests should return 401 with WWW-Authenticate
+    const unauthEndpoints = [
+      "http://localhost:8000/api/memories",
+      "http://localhost:8000/api/memories/mem-123",
+      "http://localhost:8000/api/memories/access-log",
+      "http://localhost:8000/api/tasks",
+      "http://localhost:8000/api/tasks/tk-123",
+      "http://localhost:8000/api/tasks/ready-frontier",
+      "http://localhost:8000/api/tasks/tk-123/claim",
+      "http://localhost:8000/api/tasks/tk-123/close",
+      "http://localhost:8000/api/tasks/tk-123/comments",
+      "http://localhost:8000/api/roles",
+      "http://localhost:8000/api/journals/developer",
+    ];
+
+    for (const ep of unauthEndpoints) {
+      const res = await handleHttpRequest(new Request(ep, { method: "GET" }));
+      assertEquals(res.status, 401, `Expected 401 for unauthenticated GET ${ep}`);
+      assert(
+        res.headers.get("www-authenticate")?.includes("oauth-protected-resource"),
+        `Expected www-authenticate header on 401 for ${ep}`,
+      );
+    }
+
+    // 3. Authenticated requests with Bearer token should render Web UI (200 OK)
+    const tokenInfo = await createApiToken("user_ui_test", "UI Test Token");
+    const authHeaders = { "Authorization": `Bearer ${tokenInfo.token}` };
+
+    // GET /memories - Memory Vault & Explorer UI
+    const memUiRes = await handleHttpRequest(
+      new Request("http://localhost:8000/memories", { method: "GET", headers: authHeaders }),
     );
     assertEquals(memUiRes.status, 200);
     assertEquals(memUiRes.headers.get("content-type"), "text/html; charset=utf-8");
@@ -801,9 +848,9 @@ Deno.test("Web UI Routes - HTML Rendering and Context / Role Journal Elements (/
     assert(memHtml.includes('id="memStatWorkflow"'));
     assert(memHtml.includes('id="memStatRole"'));
 
-    // 2. GET /journals - Role Journals UI
+    // GET /journals - Role Journals UI
     const journalUiRes = await handleHttpRequest(
-      new Request("http://localhost:8000/journals", { method: "GET" }),
+      new Request("http://localhost:8000/journals", { method: "GET", headers: authHeaders }),
     );
     assertEquals(journalUiRes.status, 200);
     assertEquals(journalUiRes.headers.get("content-type"), "text/html; charset=utf-8");
@@ -814,9 +861,9 @@ Deno.test("Web UI Routes - HTML Rendering and Context / Role Journal Elements (/
     assert(journalHtml.includes('id="newRoleModal"'));
     assert(journalHtml.includes("Role Journals"));
 
-    // 3. GET /tasks - Task Kanban Board UI
+    // GET /tasks - Task Kanban Board UI
     const tasksUiRes = await handleHttpRequest(
-      new Request("http://localhost:8000/tasks", { method: "GET" }),
+      new Request("http://localhost:8000/tasks", { method: "GET", headers: authHeaders }),
     );
     assertEquals(tasksUiRes.status, 200);
     assertEquals(tasksUiRes.headers.get("content-type"), "text/html; charset=utf-8");
@@ -825,7 +872,7 @@ Deno.test("Web UI Routes - HTML Rendering and Context / Role Journal Elements (/
     assert(tasksHtml.includes('id="tasksView"'));
     assert(tasksHtml.includes('id="kanbanBoard"'));
 
-    // 4. Verify Task Detail modal contains Context & Role Journal elements
+    // Verify Task Detail modal contains Context & Role Journal elements
     assert(tasksHtml.includes('id="taskContextSection"'));
     assert(
       tasksHtml.includes("Context &amp; Role Journal") ||

@@ -15,7 +15,7 @@ import { safeGetEnv } from "./env.ts";
 import { defaultRegistry } from "./mcp/registry.ts";
 import { allTools } from "./mcp/tools/index.ts";
 import { handleAuthRoutes } from "./routes/auth_routes.ts";
-import { CORS_HEADERS, errorResponse } from "./routes/common.ts";
+import { CORS_HEADERS, errorResponse, jsonResponse } from "./routes/common.ts";
 import {
   getCachedToolDefinitions,
   handleMcpRoutes,
@@ -59,11 +59,24 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
     });
   }
 
-  // 2. Auth Routes (Passkey WebAuthn & OAuth Provider Signin)
+  // 2. Fast Health Check (0 KV / 0 Auth overhead)
+  if (url.pathname === "/health" && method === "GET") {
+    return jsonResponse({
+      status: "ok",
+      server: "workflow-mcp",
+      version: "1.0.0",
+      uptime: performance.now(),
+      timestamp: new Date().toISOString(),
+      passkeysEnabled: true,
+      oauthConfigured: false,
+    });
+  }
+
+  // 3. Auth Routes (Passkey WebAuthn & OAuth Provider Signin)
   const authRes = await handleAuthRoutes(req, url);
   if (authRes) return authRes;
 
-  // 3. Resolve Authentication (Bearer Token, Session Cookie, or Header Auth)
+  // 4. Resolve Authentication (Bearer Token, Session Cookie, or Header Auth)
   const auth = await authenticateRequest(req);
 
   // 4. OAuth 2.1 Server Routes (RFC 9728 Discovery, RFC 8414 Metadata, Authorize, Token, Register)

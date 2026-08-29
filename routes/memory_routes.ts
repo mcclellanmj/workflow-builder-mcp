@@ -15,7 +15,7 @@ import {
   writeJournal,
 } from "../store/kv.ts";
 import type { MemoryScope } from "../store/types.ts";
-import { errorResponse, jsonResponse } from "./common.ts";
+import { errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
 
 export async function handleMemoryRoutes(
   req: Request,
@@ -33,7 +33,15 @@ export async function handleMemoryRoutes(
     return null;
   }
 
-  const userId = auth?.userId;
+  if (!auth) {
+    return errorResponse(
+      "Unauthorized. Please log in or provide Bearer token.",
+      401,
+      getWwwAuthenticateHeader(url.origin),
+    );
+  }
+
+  const userId = auth.userId;
 
   // 1. GET /api/memories - List memories with filters
   if (path === "/api/memories" && method === "GET") {

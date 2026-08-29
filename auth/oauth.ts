@@ -346,10 +346,17 @@ export const deleteApiToken = revokeApiToken;
  * 3. Header `X-User-Id` (when in dev/test or ALLOW_HEADER_AUTH=1)
  */
 export async function authenticateRequest(req: Request): Promise<AuthResult | null> {
-  const kv = await getKv();
+  const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
+  const cookieStr = req.headers.get("cookie") || req.headers.get("Cookie");
+  const allowHeaderAuth = safeGetEnv("ALLOW_HEADER_AUTH") === "1";
+  const headerUserId = req.headers.get("x-user-id") || req.headers.get("X-User-Id");
+
+  // Fast exit: If no auth headers or cookies exist, return null immediately without opening or touching KV
+  if (!authHeader && !cookieStr && (!allowHeaderAuth || !headerUserId)) {
+    return null;
+  }
 
   // 1. Check Bearer Token
-  const authHeader = req.headers.get("Authorization") || req.headers.get("authorization");
   if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
     const token = authHeader.slice(7).trim();
     const tokenInfo = await validateApiToken(token);
@@ -362,41 +369,40 @@ export async function authenticateRequest(req: Request): Promise<AuthResult | nu
   }
 
   // 2. Check KV OAuth Session Cookie
-  try {
-    let sessionId = await getSessionId(req);
-    if (!sessionId) {
-      const cookieStr = req.headers.get("cookie") || req.headers.get("Cookie");
-      if (cookieStr) {
-        const match = cookieStr.match(/(?:^|;\s*)site-session=([^;]+)/);
-        if (match) {
-          sessionId = decodeURIComponent(match[1]);
+  if (cookieStr) {
+    try {
+      let sessionId: string | undefined;
+      const match = cookieStr.match(/(?:^|;\s*)site-session=([^;]+)/);
+      if (match) {
+        sessionId = decodeURIComponent(match[1]);
+      }
+      if (!sessionId) {
+        sessionId = (await getSessionId(req)) ?? undefined;
+      }
+      if (sessionId) {
+        let session = sessionCache.get(sessionId);
+        if (!session) {
+          const kv = await getKv();
+          const sessionEntry = await kv.get<UserSession>(["sessions", sessionId]);
+          if (sessionEntry.value) {
+            session = sessionEntry.value;
+            sessionCache.set(sessionId, session);
+          }
+        }
+        if (session) {
+          return {
+            userId: session.userId,
+            user: session,
+            authMethod: "session",
+          };
         }
       }
+    } catch {
+      // Ignore cookie parsing errors
     }
-    if (sessionId) {
-      let session = sessionCache.get(sessionId);
-      if (!session) {
-        const sessionEntry = await kv.get<UserSession>(["sessions", sessionId]);
-        if (sessionEntry.value) {
-          session = sessionEntry.value;
-          sessionCache.set(sessionId, session);
-        }
-      }
-      if (session) {
-        return {
-          userId: session.userId,
-          user: session,
-          authMethod: "session",
-        };
-      }
-    }
-  } catch {
-    // Ignore cookie parsing errors
   }
 
   // 3. Check X-User-Id header for development / testing environments (Strict Opt-In only)
-  const allowHeaderAuth = safeGetEnv("ALLOW_HEADER_AUTH") === "1";
-  const headerUserId = req.headers.get("x-user-id") || req.headers.get("X-User-Id");
   if (allowHeaderAuth && headerUserId && headerUserId.trim().length > 0) {
     return {
       userId: headerUserId.trim(),

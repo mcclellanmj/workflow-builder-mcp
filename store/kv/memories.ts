@@ -147,7 +147,13 @@ export async function saveMemory(
         updatedAt: now,
       };
 
-      await kv.set(["users", uid, "memories", updated.id], updated);
+      const atomic = kv.atomic()
+        .set(["users", uid, "memories", updated.id], updated)
+        .set(["users", uid, "memories_by_scope", updated.scope, updated.id], updated.id);
+      const res = await atomic.commit();
+      if (!res.ok) {
+        throw new Error(`Failed to update memory with key "${trimmedKey}"`);
+      }
       return { memory: updated, created: false };
     }
   }
@@ -173,7 +179,8 @@ export async function saveMemory(
 
   const atomic = kv.atomic()
     .set(["users", uid, "memories", id], memory)
-    .set(["users", uid, "memory_keys", scope, scopeRef, trimmedKey], id);
+    .set(["users", uid, "memory_keys", scope, scopeRef, trimmedKey], id)
+    .set(["users", uid, "memories_by_scope", memory.scope, id], id);
 
   if (scope === "workflow" && memory.workflowId) {
     atomic.set(["users", uid, "memories_by_workflow", memory.workflowId, id], id);
@@ -243,6 +250,16 @@ export async function listMemories(
     for await (
       const entry of kv.list<string>({
         prefix: ["users", uid, "memories_by_workflow", filters.workflowId],
+      })
+    ) {
+      if (entry.value) ids.push(entry.value);
+    }
+    candidateIds = ids;
+  } else if (filters?.scope) {
+    const ids: string[] = [];
+    for await (
+      const entry of kv.list<string>({
+        prefix: ["users", uid, "memories_by_scope", filters.scope],
       })
     ) {
       if (entry.value) ids.push(entry.value);
@@ -471,6 +488,9 @@ export async function deleteMemory(
   opCount++;
 
   // 3. Delete secondary indexes
+  atomic.delete(["users", uid, "memories_by_scope", memory.scope, memory.id]);
+  opCount++;
+
   if (memory.scope === "workflow" && memory.workflowId) {
     atomic.delete(["users", uid, "memories_by_workflow", memory.workflowId, memory.id]);
     opCount++;

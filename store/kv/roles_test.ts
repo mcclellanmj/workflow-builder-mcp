@@ -1,7 +1,15 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { withUserContext } from "../../auth/context.ts";
 import { setKv } from "./client.ts";
-import { createRole, ensureRole, getRole, listRoles, readJournal, writeJournal } from "./roles.ts";
+import {
+  clearRoleCache,
+  createRole,
+  ensureRole,
+  getRole,
+  listRoles,
+  readJournal,
+  writeJournal,
+} from "./roles.ts";
 
 Deno.test("Roles - CRUD and Journal operations", async () => {
   const kv = await Deno.openKv(":memory:");
@@ -164,6 +172,49 @@ Deno.test("Roles - Validation errors on invalid inputs", async () => {
       );
     });
   } finally {
+    kv.close();
+  }
+});
+
+Deno.test("Roles - In-memory caching and cache invalidation", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+  clearRoleCache();
+
+  try {
+    const userId = "user_cache_test";
+
+    await withUserContext(userId, async () => {
+      // 1. Create role populates cache
+      const created = await createRole({ name: "backend-dev", description: "Backend Engineer" });
+      assertEquals(created.name, "backend-dev");
+
+      // 2. getRole returns cached object directly
+      const fetched1 = await getRole("backend-dev");
+      assertEquals(fetched1?.id, created.id);
+
+      // 3. ensureRole returns cached object without KV lookup
+      const ensured = await ensureRole("backend-dev");
+      assertEquals(ensured.id, created.id);
+
+      // 4. Update via createRole updates cache
+      const updated = await createRole({
+        name: "backend-dev",
+        description: "Lead Backend Engineer",
+      });
+      assertEquals(updated.description, "Lead Backend Engineer");
+
+      const fetched2 = await getRole("backend-dev");
+      assertEquals(fetched2?.description, "Lead Backend Engineer");
+
+      // 5. Clearing cache causes fresh KV lookup
+      clearRoleCache();
+      const fetched3 = await getRole("backend-dev");
+      assertEquals(fetched3?.id, created.id);
+      assertEquals(fetched3?.description, "Lead Backend Engineer");
+    });
+  } finally {
+    clearRoleCache();
     kv.close();
   }
 });

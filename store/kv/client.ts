@@ -23,6 +23,18 @@ export function setKv(kv: Deno.Kv): void {
   _kv = kv;
 }
 
+/** Closes the shared Deno KV instance if open. */
+export async function closeKv(): Promise<void> {
+  if (_kv) {
+    try {
+      await _kv.close();
+    } catch {
+      // Ignore if already closed
+    }
+    _kv = null;
+  }
+}
+
 /** Resolves the target userId, defaulting to the current async context or default local user. */
 export function resolveUserId(explicitUserId?: string): string {
   return (explicitUserId && explicitUserId.trim().length > 0)

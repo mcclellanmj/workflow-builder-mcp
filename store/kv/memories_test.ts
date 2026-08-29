@@ -315,3 +315,64 @@ Deno.test("Memories - Validation Errors", async () => {
     kv.close();
   }
 });
+
+Deno.test("Memories - Scope secondary index and list by scope", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const userId = "user_memory_scope_index_test";
+
+    await withUserContext(userId, async () => {
+      await saveMemory({
+        key: "role-memo-1",
+        summary: "Role memo 1",
+        content: "Role content 1",
+        scope: "role",
+        roleId: "developer",
+      });
+      await saveMemory({
+        key: "role-memo-2",
+        summary: "Role memo 2",
+        content: "Role content 2",
+        scope: "role",
+        roleId: "designer",
+      });
+      await saveMemory({
+        key: "wf-memo",
+        summary: "Workflow memo",
+        content: "WF content",
+        scope: "workflow",
+        workflowId: "wf-1",
+      });
+
+      // Verify scope index is populated in KV for "role" scope
+      const roleEntries: string[] = [];
+      for await (
+        const entry of kv.list<string>({ prefix: ["users", userId, "memories_by_scope", "role"] })
+      ) {
+        if (entry.value) roleEntries.push(entry.value);
+      }
+      assertEquals(roleEntries.length, 2);
+
+      // Verify listMemories by scope uses index
+      const roleSummaries = await listMemories({ scope: "role" });
+      assertEquals(roleSummaries.length, 2);
+      assertEquals(roleSummaries.every((m) => m.scope === "role"), true);
+
+      // Verify delete cleans up scope index
+      const toDel = roleSummaries[0];
+      await deleteMemory({ id: toDel.id });
+
+      const roleEntriesAfter: string[] = [];
+      for await (
+        const entry of kv.list<string>({ prefix: ["users", userId, "memories_by_scope", "role"] })
+      ) {
+        if (entry.value) roleEntriesAfter.push(entry.value);
+      }
+      assertEquals(roleEntriesAfter.length, 1);
+    });
+  } finally {
+    kv.close();
+  }
+});

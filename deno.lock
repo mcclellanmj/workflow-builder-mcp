@@ -14,9 +14,10 @@
     "jsr:@std/media-types@0.221": "0.221.0",
     "jsr:@std/path@0.221": "0.221.0",
     "jsr:@std/streams@0.221": "0.221.0",
-    "npm:@modelcontextprotocol/sdk@^1.29.0": "1.29.0_zod@3.25.76",
+    "npm:@modelcontextprotocol/sdk@^1.29.0": "1.29.0_zod@3.25.76_ajv@8.20.0",
     "npm:@simplewebauthn/server@10": "10.0.1",
     "npm:@simplewebauthn/types@10": "10.0.0",
+    "npm:@types/node@*": "24.2.0",
     "npm:cytoscape-dagre@^2.5.0": "2.5.0_cytoscape@3.34.1",
     "npm:cytoscape@^3.30.2": "3.34.1",
     "npm:dagre@~0.8.5": "0.8.5",
@@ -124,6 +125,28 @@
         "zod-to-json-schema"
       ]
     },
+    "@modelcontextprotocol/sdk@1.29.0_zod@3.25.76_ajv@8.20.0": {
+      "integrity": "sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==",
+      "dependencies": [
+        "@hono/node-server",
+        "ajv",
+        "ajv-formats",
+        "content-type@1.0.5",
+        "cors",
+        "cross-spawn",
+        "eventsource",
+        "eventsource-parser",
+        "express",
+        "express-rate-limit",
+        "hono",
+        "jose",
+        "json-schema-typed",
+        "pkce-challenge",
+        "raw-body",
+        "zod",
+        "zod-to-json-schema"
+      ]
+    },
     "@peculiar/asn1-android@2.9.0": {
       "integrity": "sha512-ErGsrDbWYhMu/H43L3qohwCwPrjdinn8GGm4Q52evA1u2juJxqkPXv+26vBC35hhMoUkzYIOTLrFzSbXanRU+A==",
       "dependencies": [
@@ -190,6 +213,12 @@
     "@simplewebauthn/types@10.0.0": {
       "integrity": "sha512-SFXke7xkgPRowY2E+8djKbdEznTVnD5R6GO7GPTthpHrokLvNKw8C3lFZypTxLI7KkCfGPfhtqB3d7OVGGa9jQ==",
       "deprecated": true
+    },
+    "@types/node@24.2.0": {
+      "integrity": "sha512-3xyG3pMCq3oYCNg7/ZP+E1ooTaGB4cG8JWRsqqOYQdbWNY4zbaV0Ennrd7stjiJEFZCaybcIgpTjJWHRfBSIDw==",
+      "dependencies": [
+        "undici-types"
+      ]
     },
     "accepts@2.0.0": {
       "integrity": "sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==",
@@ -714,6 +743,9 @@
         "media-typer",
         "mime-types"
       ]
+    },
+    "undici-types@7.10.0": {
+      "integrity": "sha512-t5Fy/nfn+14LuOc2KNYg75vZqClpAiqscVvMygNnlsHBFpSXdJaYtXMcdNLpl/Qvc3P2cB3s6lOV51nqsFq4ag=="
     },
     "unpipe@1.0.0": {
       "integrity": "sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ=="

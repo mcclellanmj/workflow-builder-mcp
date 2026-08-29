@@ -18,7 +18,7 @@ import {
   updateTask,
 } from "../store/kv.ts";
 import type { TaskPriority, TaskStatus, TaskType } from "../store/types.ts";
-import { CORS_HEADERS, errorResponse, jsonResponse } from "./common.ts";
+import { CORS_HEADERS, errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
 import { renderTaskKanbanHtml } from "./task_ui.ts";
 
 export async function handleTaskRoutes(
@@ -31,13 +31,23 @@ export async function handleTaskRoutes(
 
   // 1. Web UI: GET /tasks, GET /memories, GET /journals
   if ((path === "/tasks" || path === "/memories" || path === "/journals") && method === "GET") {
+    if (!auth) {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `/?redirect=${encodeURIComponent(path)}`,
+          ...CORS_HEADERS,
+        },
+      });
+    }
+
     const initialTab = path === "/memories"
       ? "memories"
       : (path === "/journals" ? "journals" : "tasks");
     const html = renderTaskKanbanHtml({
       origin: url.origin,
-      userId: auth?.userId,
-      userName: auth?.user?.name || auth?.userId,
+      userId: auth.userId,
+      userName: auth.user?.name || auth.userId,
       initialTab,
     });
 
@@ -56,7 +66,15 @@ export async function handleTaskRoutes(
     return null;
   }
 
-  const userId = auth?.userId;
+  if (!auth) {
+    return errorResponse(
+      "Unauthorized. Please log in or provide Bearer token.",
+      401,
+      getWwwAuthenticateHeader(url.origin),
+    );
+  }
+
+  const userId = auth.userId;
 
   // 2. GET /api/tasks/ready - Ready frontier
   if (path === "/api/tasks/ready" && method === "GET") {

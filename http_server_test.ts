@@ -510,8 +510,34 @@ Deno.test("HTTP Server - Task Kanban Web UI and REST API Lifecycle", async () =>
       "Content-Type": "application/json",
     };
 
-    // 1. GET /tasks renders Kanban Web UI
-    const uiReq = new Request("http://localhost:8000/tasks", { method: "GET" });
+    // 1. Unauthenticated requests to /tasks should redirect (302) and /api/tasks/* should return 401
+    const unauthUiReq = new Request("http://localhost:8000/tasks", { method: "GET" });
+    const unauthUiRes = await handleHttpRequest(unauthUiReq);
+    assertEquals(unauthUiRes.status, 302);
+    assertEquals(unauthUiRes.headers.get("location"), "/?redirect=%2Ftasks");
+
+    const unauthTasksEndpoints = [
+      "http://localhost:8000/api/tasks",
+      "http://localhost:8000/api/tasks/tk-dummy",
+      "http://localhost:8000/api/tasks/ready-frontier",
+      "http://localhost:8000/api/tasks/tk-dummy/claim",
+      "http://localhost:8000/api/tasks/tk-dummy/close",
+      "http://localhost:8000/api/tasks/tk-dummy/comments",
+    ];
+    for (const ep of unauthTasksEndpoints) {
+      const res = await handleHttpRequest(new Request(ep, { method: "GET" }));
+      assertEquals(res.status, 401, `Expected 401 for unauthenticated request to ${ep}`);
+      assert(
+        res.headers.get("www-authenticate")?.includes("oauth-protected-resource"),
+        `Expected www-authenticate header on 401 for ${ep}`,
+      );
+    }
+
+    // Authenticated GET /tasks renders Kanban Web UI (200 OK)
+    const uiReq = new Request("http://localhost:8000/tasks", {
+      method: "GET",
+      headers: authHeaders,
+    });
     const uiRes = await handleHttpRequest(uiReq);
     assertEquals(uiRes.status, 200);
     assertEquals(uiRes.headers.get("content-type"), "text/html; charset=utf-8");
@@ -660,6 +686,23 @@ Deno.test("HTTP Server - Memory and Role Journal REST API Lifecycle", async () =
       "Authorization": `Bearer ${tokenInfo.token}`,
       "Content-Type": "application/json",
     };
+
+    // 0. Unauthenticated requests to /api/memories/* and /api/roles/* should return 401
+    const unauthMemoryEndpoints = [
+      "http://localhost:8000/api/memories",
+      "http://localhost:8000/api/memories/mem-dummy",
+      "http://localhost:8000/api/memories/access-log",
+      "http://localhost:8000/api/roles",
+      "http://localhost:8000/api/journals/developer",
+    ];
+    for (const ep of unauthMemoryEndpoints) {
+      const res = await handleHttpRequest(new Request(ep, { method: "GET" }));
+      assertEquals(res.status, 401, `Expected 401 for unauthenticated request to ${ep}`);
+      assert(
+        res.headers.get("www-authenticate")?.includes("oauth-protected-resource"),
+        `Expected www-authenticate header on 401 for ${ep}`,
+      );
+    }
 
     // 1. POST /api/memories - Create workflow-scoped memory
     const createMemRes1 = await handleHttpRequest(
@@ -927,9 +970,31 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
   setKv(kv);
 
   try {
-    // 1. GET /tasks UI
-    const tasksRes = await handleHttpRequest(
+    const tokenInfo = await createApiToken("user_ui_nav", "UI Nav Token");
+    const authHeaders = { "Authorization": `Bearer ${tokenInfo.token}` };
+
+    // 1. Unauthenticated requests to Web UI routes redirect with 302
+    const unauthTasks = await handleHttpRequest(
       new Request("http://localhost:8000/tasks", { method: "GET" }),
+    );
+    assertEquals(unauthTasks.status, 302);
+    assertEquals(unauthTasks.headers.get("location"), "/?redirect=%2Ftasks");
+
+    const unauthMemories = await handleHttpRequest(
+      new Request("http://localhost:8000/memories", { method: "GET" }),
+    );
+    assertEquals(unauthMemories.status, 302);
+    assertEquals(unauthMemories.headers.get("location"), "/?redirect=%2Fmemories");
+
+    const unauthJournals = await handleHttpRequest(
+      new Request("http://localhost:8000/journals", { method: "GET" }),
+    );
+    assertEquals(unauthJournals.status, 302);
+    assertEquals(unauthJournals.headers.get("location"), "/?redirect=%2Fjournals");
+
+    // 2. Authenticated GET /tasks UI
+    const tasksRes = await handleHttpRequest(
+      new Request("http://localhost:8000/tasks", { method: "GET", headers: authHeaders }),
     );
     assertEquals(tasksRes.status, 200);
     assertEquals(tasksRes.headers.get("content-type"), "text/html; charset=utf-8");
@@ -942,9 +1007,9 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
     assert(tasksHtml.includes('class="nav-tab active" id="tab-btn-tasks"'));
     assert(tasksHtml.includes("switchMainTab"));
 
-    // 2. GET /memories UI
+    // 3. Authenticated GET /memories UI
     const memRes = await handleHttpRequest(
-      new Request("http://localhost:8000/memories", { method: "GET" }),
+      new Request("http://localhost:8000/memories", { method: "GET", headers: authHeaders }),
     );
     assertEquals(memRes.status, 200);
     assertEquals(memRes.headers.get("content-type"), "text/html; charset=utf-8");
@@ -954,9 +1019,9 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
     assert(memHtml.includes('id="memStatTotal"'));
     assert(memHtml.includes('id="memoryDetailModal"'));
 
-    // 3. GET /journals UI
+    // 4. Authenticated GET /journals UI
     const journalRes = await handleHttpRequest(
-      new Request("http://localhost:8000/journals", { method: "GET" }),
+      new Request("http://localhost:8000/journals", { method: "GET", headers: authHeaders }),
     );
     assertEquals(journalRes.status, 200);
     assertEquals(journalRes.headers.get("content-type"), "text/html; charset=utf-8");
@@ -965,7 +1030,7 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
     assert(journalHtml.includes('id="rolesGrid"'));
     assert(journalHtml.includes('id="editJournalModal"'));
 
-    // 4. GET / Dashboard Navigation & Endpoints List
+    // 5. GET / Dashboard Navigation & Endpoints List (Public)
     const dashRes = await handleHttpRequest(
       new Request("http://localhost:8000/", { method: "GET" }),
     );
