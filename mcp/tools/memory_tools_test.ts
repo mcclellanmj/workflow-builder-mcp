@@ -68,6 +68,21 @@ Deno.test("Memory MCP Tools - Save across workflow, node, role scopes and upsert
     assertEquals(saveRoleData.memory.roleId, "backend-reviewer");
     assertNotEquals(saveRoleData.memory.id, saveWfData.memory.id);
 
+    // 3b. Role-scoped memory using 'scopeId' generic alias
+    const saveScopeIdRes = await memorySaveTool.execute({
+      key: "unity-patterns",
+      summary: "Unity gameplay patterns",
+      content: "Use ScriptableObjects for game state and event buses.",
+      scope: "role",
+      scopeId: "unity-gameplay-engineer",
+      tags: ["unity", "patterns"],
+    });
+    assert(!saveScopeIdRes.isError, "memory_save for role with scopeId failed");
+    const saveScopeIdData = JSON.parse(saveScopeIdRes.content[0].text);
+    assertEquals(saveScopeIdData.created, true);
+    assertEquals(saveScopeIdData.memory.scope, "role");
+    assertEquals(saveScopeIdData.memory.roleId, "unity-gameplay-engineer");
+
     // 4. Upsert behavior: update workflow memory with same key and scope
     const updateWfRes = await memorySaveTool.execute({
       key: "oauth-config",

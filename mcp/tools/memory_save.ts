@@ -10,68 +10,77 @@ import {
 } from "../helpers.ts";
 
 const MemorySaveSchema = z.object({
-  key: z.string().min(1).describe("Lookup key, e.g. auth-pattern, edge-case-notes"),
-  summary: z.string().min(1).describe("Short one-line description shown in memory_list"),
-  content: z.string().min(1).describe("Full content of the memory"),
+  key: z.string().min(1).describe(
+    "Lookup key for the memory entry, e.g. 'auth-pattern', 'edge-case-notes', 'architecture-decision'",
+  ),
+  summary: z.string().min(1).describe(
+    "Short one-line description or title of the memory shown in memory_list",
+  ),
+  content: z.string().min(1).describe(
+    "Full detailed content/body of the memory to persist and recall later",
+  ),
   scope: z.enum(["workflow", "node", "role"]).describe(
-    "Scope level: 'workflow', 'node', or 'role'",
-  ),
-  workflow: z.string().min(1).optional().describe(
-    "Workflow ID, name, or slug (required if scope is 'workflow' or 'node')",
-  ),
-  workflowId: z.string().min(1).optional().describe(
-    "Alias for 'workflow'",
-  ),
-  node: z.string().min(1).optional().describe(
-    "Node ID, name, or slug (required if scope is 'node')",
-  ),
-  nodeId: z.string().min(1).optional().describe(
-    "Alias for 'node'",
-  ),
-  role: z.string().min(1).optional().describe(
-    "Role name or ID (required if scope is 'role')",
+    "Scope level: 'workflow' (shared across workflow), 'node' (specific to a node), or 'role' (specific to a role)",
   ),
   roleId: z.string().min(1).optional().describe(
-    "Alias for 'role'",
+    "Role identifier (e.g. 'unity-gameplay-engineer', 'developer', 'qa-engineer'). Required when scope is 'role'.",
+  ),
+  role: z.string().min(1).optional().describe(
+    "Alias for 'roleId'. Role name or identifier.",
+  ),
+  workflowId: z.string().min(1).optional().describe(
+    "Workflow UUID, name, or slug. Required when scope is 'workflow' or 'node'.",
+  ),
+  workflow: z.string().min(1).optional().describe(
+    "Alias for 'workflowId'. Workflow UUID, name, or slug.",
+  ),
+  nodeId: z.string().min(1).optional().describe(
+    "Node UUID, name, or slug. Required when scope is 'node'.",
+  ),
+  node: z.string().min(1).optional().describe(
+    "Alias for 'nodeId'. Node UUID, name, or slug.",
+  ),
+  scopeId: z.string().min(1).optional().describe(
+    "Generic scope target identifier alias. Automatically maps to 'roleId' (when scope is 'role'), 'workflowId' (when scope is 'workflow'), or 'nodeId' (when scope is 'node').",
   ),
   source: z.string().optional().describe(
-    "Optional author, agent, or tool that recorded this memory",
+    "Optional author, agent, or tool identifier that recorded this memory",
   ),
   tags: z.array(z.string()).optional().describe(
-    "Optional tags for categorization and search",
+    "Optional array of string tags for categorization, filtering, and search",
   ),
 }).refine(
   (data) => {
     if (data.scope === "workflow" || data.scope === "node") {
-      return Boolean(data.workflow || data.workflowId);
+      return Boolean(data.workflowId || data.workflow || (data.scope === "workflow" && data.scopeId));
     }
     return true;
   },
   {
     message:
-      "Workflow ('workflow' or 'workflowId') is required when scope is 'workflow' or 'node'.",
+      "Workflow ('workflowId', 'workflow', or 'scopeId') is required when scope is 'workflow' or 'node'.",
     path: ["workflowId"],
   },
 ).refine(
   (data) => {
     if (data.scope === "node") {
-      return Boolean(data.node || data.nodeId);
+      return Boolean(data.nodeId || data.node || data.scopeId);
     }
     return true;
   },
   {
-    message: "Node ('node' or 'nodeId') is required when scope is 'node'.",
+    message: "Node ('nodeId', 'node', or 'scopeId') is required when scope is 'node'.",
     path: ["nodeId"],
   },
 ).refine(
   (data) => {
     if (data.scope === "role") {
-      return Boolean(data.role || data.roleId);
+      return Boolean(data.roleId || data.role || data.scopeId);
     }
     return true;
   },
   {
-    message: "Role ('role' or 'roleId') is required when scope is 'role'.",
+    message: "Role ('roleId', 'role', or 'scopeId') is required when scope is 'role'.",
     path: ["roleId"],
   },
 );
@@ -79,7 +88,7 @@ const MemorySaveSchema = z.object({
 export const memorySaveTool = defineTool({
   name: "memory_save",
   description:
-    "Saves or updates a persistent memory entry scoped to a workflow, node, or role. If a memory with the same key exists in the specified scope, it updates the existing entry (upsert behavior).",
+    "Saves or updates a memory entry. When scope is 'role', you MUST provide 'roleId' (e.g. 'unity-gameplay-engineer'). When scope is 'workflow', provide 'workflowId'. When scope is 'node', provide 'nodeId'. If a memory with the same key exists in the specified scope, it updates the existing entry (upsert behavior).",
   schema: MemorySaveSchema,
   execute: async ({
     key,
@@ -92,36 +101,37 @@ export const memorySaveTool = defineTool({
     nodeId: nodeIdArg,
     role,
     roleId: roleIdArg,
+    scopeId,
     source,
     tags,
   }) => {
-    let workflowId = workflow ?? workflowIdArg;
+    let workflowId = workflowIdArg ?? workflow ?? (scope === "workflow" ? scopeId : undefined);
     if (workflowId) {
       const resolved = await resolveWorkflow(workflowId);
       if (resolved) workflowId = resolved.id;
     }
 
-    let nodeId = node ?? nodeIdArg;
+    let nodeId = nodeIdArg ?? node ?? (scope === "node" ? scopeId : undefined);
     if (nodeId && workflowId) {
       const resolvedNode = await resolveNodeInWorkflow(workflowId, nodeId);
       if (resolvedNode) nodeId = resolvedNode.id;
     }
 
-    const roleId = (role ?? roleIdArg)?.trim();
+    const roleId = (roleIdArg ?? role ?? (scope === "role" ? scopeId : undefined))?.trim();
 
     if ((scope === "workflow" || scope === "node") && !workflowId) {
       return createErrorResponse(
-        "Workflow ('workflow' or 'workflowId') is required when scope is 'workflow' or 'node'.",
+        "Workflow ('workflowId', 'workflow', or 'scopeId') is required when scope is 'workflow' or 'node'.",
       );
     }
     if (scope === "node" && !nodeId) {
       return createErrorResponse(
-        "Node ('node' or 'nodeId') is required when scope is 'node'.",
+        "Node ('nodeId', 'node', or 'scopeId') is required when scope is 'node'.",
       );
     }
     if (scope === "role" && !roleId) {
       return createErrorResponse(
-        "Role ('role' or 'roleId') is required when scope is 'role'.",
+        "Role ('roleId', 'role', or 'scopeId') is required when scope is 'role'.",
       );
     }
 
