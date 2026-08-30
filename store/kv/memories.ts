@@ -24,6 +24,7 @@ export interface SaveMemoryInput {
   roleId?: string;
   source?: string;
   tags?: string[];
+  embedding?: number[];
 }
 
 /** Result returned after saving a memory. */
@@ -142,6 +143,7 @@ export async function saveMemory(
         content: input.content,
         source: input.source !== undefined ? input.source : existingEntry.value.source,
         tags: input.tags !== undefined ? input.tags : existingEntry.value.tags,
+        embedding: input.embedding !== undefined ? input.embedding : existingEntry.value.embedding,
         accessCount: existingEntry.value.accessCount,
         lastAccessed: existingEntry.value.lastAccessed,
         updatedAt: now,
@@ -172,6 +174,7 @@ export async function saveMemory(
     roleId: input.roleId,
     source: input.source,
     tags: input.tags,
+    embedding: input.embedding,
     accessCount: 0,
     createdAt: now,
     updatedAt: now,
@@ -403,6 +406,51 @@ export async function recallMemory(
   }
 
   return updatedMemory;
+}
+
+/**
+ * Records an access event for a memory in telemetry / access log and atomically increments accessCount.
+ */
+export async function recordMemoryAccess(
+  memoryId: string,
+  params?: {
+    accessedBy?: string;
+    executionId?: ExecutionId;
+    taskId?: TaskId;
+    userId?: string;
+  },
+): Promise<void> {
+  const uid = resolveUserId(params?.userId);
+  const kv = await getKv();
+  const memory = await getMemory(memoryId, uid);
+  if (!memory) return;
+
+  const accessId = crypto.randomUUID();
+  const accessedAt = new Date().toISOString();
+  const accessRecord: MemoryAccessRecord = {
+    id: accessId,
+    memoryId: memory.id,
+    memoryKey: memory.key,
+    accessedAt,
+    accessedBy: params?.accessedBy,
+    executionId: params?.executionId,
+    taskId: params?.taskId,
+  };
+
+  const updatedMemory: Memory = {
+    ...memory,
+    accessCount: (memory.accessCount || 0) + 1,
+    lastAccessed: accessedAt,
+  };
+
+  const res = await kv.atomic()
+    .set(["users", uid, "memory_access_log", memory.id, accessId], accessRecord)
+    .set(["users", uid, "memories", memory.id], updatedMemory)
+    .commit();
+
+  if (!res.ok) {
+    throw new Error(`Failed to record memory access for memory "${memory.id}"`);
+  }
 }
 
 /**

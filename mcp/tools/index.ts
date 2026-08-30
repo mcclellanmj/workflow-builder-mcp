@@ -25,6 +25,7 @@ import { workflowTreeTool } from "./tree_workflow.ts";
 
 // Task tools
 import { createTaskTool } from "./task_create.ts";
+import { taskCreateBatchTool } from "./task_create_batch.ts";
 import { listTasksTool } from "./task_list.ts";
 import { getTaskTool } from "./task_get.ts";
 import { updateTaskTool } from "./task_update.ts";
@@ -39,6 +40,7 @@ import { memorySaveTool } from "./memory_save.ts";
 import { memoryListTool } from "./memory_list.ts";
 import { memoryRecallTool } from "./memory_recall.ts";
 import { memoryDeleteTool } from "./memory_delete.ts";
+import { memorySearchTool } from "./memory_search.ts";
 
 // Role & Journal tools
 import { roleCreateTool } from "./role_create.ts";
@@ -81,11 +83,13 @@ export {
   memoryListTool,
   memoryRecallTool,
   memorySaveTool,
+  memorySearchTool,
   readyTasksTool,
   roleCreateTool,
   roleListTool,
   searchWorkflowTool,
   searchWorkflowTool as workflowSearchTool,
+  taskCreateBatchTool,
   taskHandoffTool,
   updateTaskTool,
   validateWorkflowTool,
@@ -118,6 +122,7 @@ export const allTools: McpTool[] = [
   workflowTreeTool,
   // Tasks
   createTaskTool,
+  taskCreateBatchTool,
   listTasksTool,
   getTaskTool,
   updateTaskTool,
@@ -131,6 +136,7 @@ export const allTools: McpTool[] = [
   memoryListTool,
   memoryRecallTool,
   memoryDeleteTool,
+  memorySearchTool,
   // Roles & Journal
   roleCreateTool,
   roleListTool,

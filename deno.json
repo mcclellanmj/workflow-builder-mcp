@@ -41,6 +41,7 @@
   "imports": {
     "@deno/kv-oauth": "jsr:@deno/kv-oauth@^0.11.0",
     "@modelcontextprotocol/sdk": "npm:@modelcontextprotocol/sdk@^1.29.0",
+    "@orama/orama": "npm:@orama/orama@^3.0.0",
     "@simplewebauthn/server": "npm:@simplewebauthn/server@^10.0.0",
     "@simplewebauthn/types": "npm:@simplewebauthn/types@^10.0.0",
     "@std/assert": "jsr:@std/assert@^1.0.0",

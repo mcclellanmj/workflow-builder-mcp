@@ -36,6 +36,8 @@ export interface CreateTaskInput {
   parentTaskId?: TaskId;
   context?: string;
   rejectedApproaches?: string[];
+  inputs?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   closedReason?: string;
   comments?: TaskComment[];
   createdAt?: string;

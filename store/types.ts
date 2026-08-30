@@ -299,6 +299,11 @@ export interface Task {
   /** Approaches that were tried and failed — prevents the next agent from repeating. */
   rejectedApproaches?: string[];
 
+  /** Custom inputs payload passed to the task. */
+  inputs?: Record<string, unknown>;
+  /** Custom metadata key-values. */
+  metadata?: Record<string, unknown>;
+
   closedReason?: string;
   /** Chronological log of short comments (max 256 chars each). Guaranteed to be an array. */
   comments: TaskComment[];
@@ -376,6 +381,7 @@ export interface Memory {
   // Metadata
   source?: string;
   tags?: string[];
+  embedding?: number[];
   lastAccessed?: string;
   accessCount?: number;
 
