@@ -8,6 +8,7 @@ import {
   getRole,
   listRoles,
   readJournal,
+  readJournals,
   writeJournal,
 } from "./roles.ts";
 
@@ -98,6 +99,13 @@ Deno.test("Roles - CRUD and Journal operations", async () => {
       assertEquals(jDevOps.roleId, "devops");
       const devopsRole = await getRole("devops");
       assertEquals(devopsRole?.name, "devops");
+
+      // Bulk read journals
+      const bulkJournals = await readJournals(["frontend", "devops", "missing_role"]);
+      assertEquals(bulkJournals.size, 2);
+      assertEquals(bulkJournals.get("frontend")?.entry, "Finished login form, starting dashboard");
+      assertEquals(bulkJournals.get("devops")?.entry, "Setting up CI");
+      assertEquals(bulkJournals.get("missing_role"), undefined);
     });
   } finally {
     kv.close();

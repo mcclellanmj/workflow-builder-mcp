@@ -1,0 +1,48 @@
+<<<<<<< SEARCH
+  readJournal,
+  writeJournal,
+} from "./roles.ts";
+=======
+  readJournal,
+  readJournals,
+  writeJournal,
+} from "./roles.ts";
+>>>>>>> REPLACE
+<<<<<<< SEARCH
+      const read2 = await readJournal("frontend");
+      assertEquals(read2?.entry, "Finished login form, starting dashboard");
+      assertEquals(read2?.writtenBy, "agent-beta");
+
+      // Journal auto-creates role if role didn't exist
+      const jDevOps = await writeJournal("devops", "Setting up CI", "agent-gamma");
+      assertEquals(jDevOps.roleId, "devops");
+      const devopsRole = await getRole("devops");
+      assertEquals(devopsRole?.name, "devops");
+    });
+  } finally {
+    kv.close();
+  }
+});
+=======
+      const read2 = await readJournal("frontend");
+      assertEquals(read2?.entry, "Finished login form, starting dashboard");
+      assertEquals(read2?.writtenBy, "agent-beta");
+
+      // Journal auto-creates role if role didn't exist
+      const jDevOps = await writeJournal("devops", "Setting up CI", "agent-gamma");
+      assertEquals(jDevOps.roleId, "devops");
+      const devopsRole = await getRole("devops");
+      assertEquals(devopsRole?.name, "devops");
+
+      // Bulk read journals
+      const bulkJournals = await readJournals(["frontend", "devops", "missing_role"]);
+      assertEquals(bulkJournals.size, 2);
+      assertEquals(bulkJournals.get("frontend")?.entry, "Finished login form, starting dashboard");
+      assertEquals(bulkJournals.get("devops")?.entry, "Setting up CI");
+      assertEquals(bulkJournals.get("missing_role"), undefined);
+    });
+  } finally {
+    kv.close();
+  }
+});
+>>>>>>> REPLACE
