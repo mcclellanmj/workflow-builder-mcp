@@ -10,6 +10,7 @@ import {
   listMemories,
   listRoles,
   readJournal,
+  readJournals,
   recallMemory,
   saveMemory,
   writeJournal,
@@ -210,15 +211,14 @@ export async function handleMemoryRoutes(
   if (path === "/api/roles" && method === "GET") {
     try {
       const roles = await listRoles({ userId });
-      const enrichedRoles = await Promise.all(
-        roles.map(async (role) => {
-          const journal = await readJournal(role.name, userId);
-          return {
-            ...role,
-            journal,
-          };
-        }),
-      );
+
+      const roleNames = roles.map((r) => r.name);
+      const journalsMap = await readJournals(roleNames, userId);
+
+      const enrichedRoles = roles.map((role) => ({
+        ...role,
+        journal: journalsMap.get(role.name) || null,
+      }));
 
       return jsonResponse({
         count: enrichedRoles.length,

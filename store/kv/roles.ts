@@ -4,7 +4,13 @@
 
 import type { Role, RoleJournal } from "../types.ts";
 import { TtlCache } from "../cache.ts";
-import { getKv, listEntries, type ListOptions, resolveUserId } from "./client.ts";
+import {
+  getKv,
+  listEntries,
+  type ListOptions,
+  MAX_GET_MANY_KEYS,
+  resolveUserId,
+} from "./client.ts";
 
 /** In-memory cache for role lookups to eliminate redundant KV queries during task and memory creation. */
 const roleCache = new TtlCache<string, Role>({ defaultTtlMs: 300_000, maxCapacity: 1000 });
@@ -137,4 +143,31 @@ export async function readJournal(
   const kv = await getKv();
   const entry = await kv.get<RoleJournal>(["users", uid, "role_journals", roleName.trim()]);
   return entry.value;
+}
+
+/**
+ * Fetches multiple journals for multiple roles in bulk using chunked kv.getMany calls.
+ */
+export async function readJournals(
+  roleNames: string[],
+  userId?: string,
+): Promise<Map<string, RoleJournal>> {
+  if (roleNames.length === 0) return new Map();
+  const uid = resolveUserId(userId);
+  const kv = await getKv();
+  const results = new Map<string, RoleJournal>();
+
+  for (let i = 0; i < roleNames.length; i += MAX_GET_MANY_KEYS) {
+    const chunk = roleNames.slice(i, i + MAX_GET_MANY_KEYS);
+    const keys = chunk.map((name) => ["users", uid, "role_journals", name.trim()]);
+    const entries = await kv.getMany<RoleJournal[]>(keys);
+    for (let j = 0; j < entries.length; j++) {
+      const entry = entries[j];
+      if (entry.value) {
+        results.set(chunk[j], entry.value);
+      }
+    }
+  }
+
+  return results;
 }
