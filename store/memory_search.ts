@@ -2,7 +2,7 @@
  * Stateless, on-demand memory search engine using Orama BM25 and vector/hybrid indexing.
  */
 
-import { create, insert, search } from "@orama/orama";
+import { create, insertMultiple, search } from "@orama/orama";
 import type { Memory, MemoryScope } from "./types.ts";
 
 export type SearchMode = "hybrid" | "keyword" | "vector";
@@ -162,7 +162,7 @@ export async function searchMemoriesFromKv(
   const db = await create({ schema: schema as any });
 
   // 4. Insert candidate memories into Orama
-  for (const m of candidateMemories) {
+  const docs = candidateMemories.map((m) => {
     const doc: Record<string, unknown> = {
       id: m.id,
       key: m.key,
@@ -181,9 +181,11 @@ export async function searchMemoriesFromKv(
         : undefined;
     }
 
-    // deno-lint-ignore no-explicit-any
-    await insert(db, doc as any);
-  }
+    return doc;
+  });
+
+  // deno-lint-ignore no-explicit-any
+  await insertMultiple(db, docs as any);
 
   // 5. Determine search mode
   let searchMode: SearchMode = params.mode ?? "keyword";

@@ -102,12 +102,14 @@ async function buildWorkflowTree(
       (n) => n.type === "subworkflow" && typeof n.config?.childWorkflowId === "string",
     );
 
-    for (const subNode of subworkflowNodes) {
-      const childId = (subNode.config.childWorkflowId as string).trim();
-      if (!childId || visited.has(childId)) continue;
+    const childResults = await Promise.all(
+      subworkflowNodes.map(async (subNode) => {
+        const childId = (subNode.config!.childWorkflowId as string).trim();
+        if (!childId || visited.has(childId)) return null;
 
-      const childWf = await getWorkflow(childId);
-      if (childWf) {
+        const childWf = await getWorkflow(childId);
+        if (!childWf) return null;
+
         const nextVisited = new Set(visited);
         nextVisited.add(childId);
 
@@ -119,11 +121,17 @@ async function buildWorkflowTree(
           includeDescriptions,
         );
 
-        treeNode.children.push({
+        return {
           subworkflowNodeId: subNode.id,
           subworkflowNodeName: subNode.name,
           tree: childTree,
-        });
+        };
+      }),
+    );
+
+    for (const res of childResults) {
+      if (res) {
+        treeNode.children.push(res);
       }
     }
   }

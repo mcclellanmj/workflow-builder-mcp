@@ -6,8 +6,7 @@
 import type { WorkflowExportData } from "../../store/types.ts";
 import { getVisualizerClientScript } from "./client_script.ts";
 import { getVisualizerStyles } from "./styles.ts";
-import { escapeHtml } from "./svg_renderer.ts";
-import type { SsrVisualizerOptions } from "./types.ts";
+import { escapeHtml, type SsrVisualizerOptions } from "./types.ts";
 import { CYTOSCAPE_VENDOR_JS } from "./vendor_bundle.ts";
 
 export function generateSsrVisualizerHtml(options: SsrVisualizerOptions): string {

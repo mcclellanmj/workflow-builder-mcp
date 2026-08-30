@@ -89,40 +89,24 @@ export const contextPrimeTool = defineTool({
     }
     const handoffsLoaded = handoffs.length;
 
-    // 4. Gather candidate memories
+    // 4. Gather candidate memories in parallel
+    const [nodeMems, wfMems, roleMems] = await Promise.all([
+      resolvedWfId && targetNodeId
+        ? listMemories({ workflowId: resolvedWfId, nodeId: targetNodeId })
+        : Promise.resolve([]),
+      resolvedWfId ? listMemories({ workflowId: resolvedWfId }) : Promise.resolve([]),
+      targetRole && targetRole.trim()
+        ? listMemories({ roleId: targetRole.trim() })
+        : Promise.resolve([]),
+    ]);
+
     const seenMemoryIds = new Set<string>();
     const candidateSummaries: MemorySummary[] = [];
 
-    // 4a. Node memories (if workflow and nodeId known)
-    if (resolvedWfId && targetNodeId) {
-      const nodeMems = await listMemories({ workflowId: resolvedWfId, nodeId: targetNodeId });
-      for (const m of nodeMems) {
-        if (!seenMemoryIds.has(m.id)) {
-          seenMemoryIds.add(m.id);
-          candidateSummaries.push(m);
-        }
-      }
-    }
-
-    // 4b. Workflow memories
-    if (resolvedWfId) {
-      const wfMems = await listMemories({ workflowId: resolvedWfId });
-      for (const m of wfMems) {
-        if (!seenMemoryIds.has(m.id)) {
-          seenMemoryIds.add(m.id);
-          candidateSummaries.push(m);
-        }
-      }
-    }
-
-    // 4c. Role memories
-    if (targetRole && targetRole.trim()) {
-      const roleMems = await listMemories({ roleId: targetRole.trim() });
-      for (const m of roleMems) {
-        if (!seenMemoryIds.has(m.id)) {
-          seenMemoryIds.add(m.id);
-          candidateSummaries.push(m);
-        }
+    for (const m of [...nodeMems, ...wfMems, ...roleMems]) {
+      if (!seenMemoryIds.has(m.id)) {
+        seenMemoryIds.add(m.id);
+        candidateSummaries.push(m);
       }
     }
 
@@ -201,27 +185,30 @@ export const contextPrimeTool = defineTool({
     const loadedMemories: Memory[] = [];
     let memoryCharsUsed = 0;
 
-    for (const summary of candidateSummaries) {
+    const recalledMemories = await Promise.all(
+      candidateSummaries.map((summary) =>
+        recallMemory({
+          id: summary.id,
+          taskId: taskRecord?.id,
+          executionId: targetExecutionId,
+          accessedBy: targetRole || "context_prime",
+        })
+      ),
+    );
+
+    for (const recalled of recalledMemories) {
+      if (!recalled) continue;
       if (memoryCharsUsed >= memoryCharBudget) break;
 
-      const recalled = await recallMemory({
-        id: summary.id,
-        taskId: taskRecord?.id,
-        executionId: targetExecutionId,
-        accessedBy: targetRole || "context_prime",
-      });
-
-      if (recalled) {
-        const memSnippet =
-          `### [${recalled.scope.toUpperCase()}] ${recalled.key}\n> ${recalled.summary}\n\n${recalled.content}\n\n`;
-        if (
-          memoryCharsUsed + memSnippet.length <= memoryCharBudget || loadedMemories.length === 0
-        ) {
-          loadedMemories.push(recalled);
-          memoryCharsUsed += memSnippet.length;
-        } else {
-          break;
-        }
+      const memSnippet =
+        `### [${recalled.scope.toUpperCase()}] ${recalled.key}\n> ${recalled.summary}\n\n${recalled.content}\n\n`;
+      if (
+        memoryCharsUsed + memSnippet.length <= memoryCharBudget || loadedMemories.length === 0
+      ) {
+        loadedMemories.push(recalled);
+        memoryCharsUsed += memSnippet.length;
+      } else {
+        break;
       }
     }
 

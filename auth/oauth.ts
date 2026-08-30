@@ -16,8 +16,14 @@ import { safeGetEnv } from "../env.ts";
 import { getKv } from "../store/kv.ts";
 import { TtlCache } from "../store/cache.ts";
 
-export const apiTokenCache = new TtlCache<string, ApiTokenInfo>({ defaultTtlMs: 300_000 });
-export const sessionCache = new TtlCache<string, UserSession>({ defaultTtlMs: 300_000 });
+export const apiTokenCache = new TtlCache<string, ApiTokenInfo>({
+  defaultTtlMs: 300_000,
+  maxCapacity: 5000,
+});
+export const sessionCache = new TtlCache<string, UserSession>({
+  defaultTtlMs: 300_000,
+  maxCapacity: 5000,
+});
 
 export interface UserSession {
   userId: string;

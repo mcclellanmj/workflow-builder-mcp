@@ -5,7 +5,7 @@
 import type { ToolCallResponse } from "./registry.ts";
 import { createErrorResponse } from "./registry.ts";
 import { resolveNode, resolveWorkflow } from "./resolvers.ts";
-import { getExecution, listEdges, listNodes, saveExecution, saveNodes } from "../store/kv.ts";
+import { getExecution, listEdges, listNodes } from "../store/kv.ts";
 import type {
   ExecutionId,
   NodeExecutionState,
@@ -256,132 +256,6 @@ export function validateNodeConfig(
     return validateUserInteractionConfig(config);
   }
   return null;
-}
-
-/**
- * Shapes a WorkflowNode into the public actionable next-node DTO.
- */
-export function formatActionableNode(node: WorkflowNode): {
-  id: string;
-  name: string;
-  type: string;
-  description: string;
-  runInSubAgent: boolean;
-  config: Record<string, unknown>;
-  status: string;
-  iteration?: number;
-} {
-  return {
-    id: node.id,
-    name: node.name,
-    type: node.type,
-    description: node.description,
-    runInSubAgent: node.runInSubAgent,
-    config: node.config,
-    status: node.status,
-    ...(node.iteration !== undefined ? { iteration: node.iteration } : {}),
-  };
-}
-
-/**
- * Traverses candidate edges, automatically marks reached 'end' nodes as completed,
- * partitions actionable next nodes from terminal end nodes, and handles loop re-entry / iterations.
- */
-export async function advanceAcrossEdges(
-  edges: WorkflowEdge[],
-  nodeMap: Map<string, WorkflowNode>,
-  now: string,
-  execution?: WorkflowExecution,
-): Promise<{ actionableNextNodes: WorkflowNode[]; completedEndNodes: WorkflowNode[] }> {
-  const actionableNextNodes: WorkflowNode[] = [];
-  const completedEndNodes: WorkflowNode[] = [];
-  const modifiedNodes: WorkflowNode[] = [];
-
-  const getNodeState = (node: WorkflowNode): WorkflowNode => {
-    if (!execution) return node;
-    const ns = execution.nodeStates[node.id];
-    if (!ns) return node;
-    return {
-      ...node,
-      status: ns.status,
-      error: ns.error,
-      iteration: ns.iteration,
-      iterationHistory: ns.iterationHistory,
-      updatedAt: ns.updatedAt,
-    };
-  };
-
-  const applyNodeMutation = (node: WorkflowNode): void => {
-    nodeMap.set(node.id, node);
-    if (execution) {
-      execution.nodeStates[node.id] = {
-        nodeId: node.id,
-        status: node.status,
-        error: node.error,
-        iteration: node.iteration,
-        iterationHistory: node.iterationHistory,
-        updatedAt: node.updatedAt,
-      };
-    } else {
-      modifiedNodes.push(node);
-    }
-  };
-
-  for (const edge of edges) {
-    const baseNode = nodeMap.get(edge.toNodeId);
-    if (!baseNode) continue;
-
-    const targetNode = { ...getNodeState(baseNode) };
-
-    if (targetNode.type === "end") {
-      targetNode.status = "completed";
-      targetNode.updatedAt = now;
-      applyNodeMutation(targetNode);
-      completedEndNodes.push(targetNode);
-    } else if (targetNode.status !== "pending") {
-      const currentIteration = targetNode.iteration ?? 1;
-      const rawMax = Number(targetNode.config?.maxIterations);
-      const maxIterations = Number.isInteger(rawMax) && rawMax > 0 && rawMax <= 100 ? rawMax : 10;
-
-      if (currentIteration >= maxIterations) {
-        targetNode.status = "failed";
-        targetNode.error = `Loop iteration limit exceeded (maximum ${maxIterations} iterations).`;
-        targetNode.updatedAt = now;
-        applyNodeMutation(targetNode);
-      } else {
-        const history = targetNode.iterationHistory ?? [];
-        history.push({
-          iteration: currentIteration,
-          error: targetNode.error,
-          completedAt: targetNode.updatedAt || now,
-        });
-
-        targetNode.iterationHistory = history;
-        targetNode.iteration = currentIteration + 1;
-        targetNode.status = "pending";
-        targetNode.error = null;
-        targetNode.updatedAt = now;
-
-        applyNodeMutation(targetNode);
-        actionableNextNodes.push(targetNode);
-      }
-    } else {
-      if (targetNode.iteration === undefined) {
-        targetNode.iteration = 1;
-        targetNode.updatedAt = now;
-        applyNodeMutation(targetNode);
-      }
-      actionableNextNodes.push(targetNode);
-    }
-  }
-
-  if (execution) {
-    await saveExecution(execution);
-  } else if (modifiedNodes.length > 0) {
-    await saveNodes(modifiedNodes);
-  }
-
-  return { actionableNextNodes, completedEndNodes };
 }
 
 /**

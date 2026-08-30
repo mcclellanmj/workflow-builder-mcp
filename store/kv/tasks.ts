@@ -1177,20 +1177,28 @@ export async function closeTask(
     const targetTaskIds = Array.from(new Set(blockingOutbound.map((d) => d.toTaskId)));
     const targetTasks = await getTasks(targetTaskIds, uid);
 
-    for (const dependentTask of targetTasks) {
-      if (dependentTask && dependentTask.status === "blocked") {
-        // Check if all blockers for dependentTask are now resolved
-        const inboundDeps = await getDependencies(dependentTask.id, "blocked-by", uid);
-        const blockerIds = inboundDeps
-          .filter((d) => d.type === "blocks" || d.type === "waits-for")
-          .map((d) => d.fromTaskId);
-        const blockers = await getTasks(blockerIds, uid);
-        const allClosed = blockers.every((b) => b.status === "closed" || b.status === "wontfix");
+    const evaluationResults = await Promise.all(
+      targetTasks.map(async (dependentTask) => {
+        if (dependentTask && dependentTask.status === "blocked") {
+          // Check if all blockers for dependentTask are now resolved
+          const inboundDeps = await getDependencies(dependentTask.id, "blocked-by", uid);
+          const blockerIds = inboundDeps
+            .filter((d) => d.type === "blocks" || d.type === "waits-for")
+            .map((d) => d.fromTaskId);
+          const blockers = await getTasks(blockerIds, uid);
+          const allClosed = blockers.every((b) => b.status === "closed" || b.status === "wontfix");
 
-        if (allClosed) {
-          const unblocked = await updateTask(dependentTask.id, { status: "open" }, uid);
-          unblockedTasks.push(unblocked);
+          if (allClosed) {
+            return await updateTask(dependentTask.id, { status: "open" }, uid);
+          }
         }
+        return null;
+      }),
+    );
+
+    for (const unblocked of evaluationResults) {
+      if (unblocked) {
+        unblockedTasks.push(unblocked);
       }
     }
   }

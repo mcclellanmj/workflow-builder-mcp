@@ -269,10 +269,21 @@ storage. Zero server deployment or network setup required.
 | `task_claim`                   | Atomically claim a ready task to prevent duplicate concurrent work.                 |
 | `task_close`                   | Complete a task and automatically unblock downstream tasks in the DAG.              |
 | `task_create`                  | Create assignable tasks or epics with roles, priorities, and parent-child nesting.  |
+| `task_create_batch`            | Batch create multiple tasks and wire internal dependencies in one atomic call.      |
 | `task_list`                    | List tasks filtered by workflow, role, assignee, or status.                         |
 | `task_get`                     | Retrieve full task details, blocking dependencies, and child subtasks.              |
 | `task_update`                  | Update task details, status, or append progress notes.                              |
 | `task_depend`                  | Wire or remove dependency edges (`blocks`, `waits-for`, `conditional-blocks`).      |
+| `task_comment`                 | Append a lightweight log comment (max 256 characters) to a task.                    |
+| `role_create`                  | Define a user-defined role with description.                                        |
+| `role_list`                    | List all registered user-defined roles for the current user.                        |
+| `journal_write`                | Save single-entry role shutdown snapshot and next steps.                            |
+| `journal_read`                 | Read the role's latest journal entry on session wakeup.                             |
+| `memory_save`                  | Save persistent memory scoped to a workflow, node, or role.                         |
+| `memory_list`                  | List memory summaries with lastAccessed and accessCount tracking.                   |
+| `memory_recall`                | Retrieve full content and log a memory access record.                               |
+| `memory_delete`                | Delete a memory and return its lifetime access count.                               |
+| `memory_search`                | Full-text search across memories with BM25 vector ranking.                          |
 | `task_handoff`                 | Transfer task between agents preserving context and rejected approaches.            |
 | `context_prime`                | Bootstrap session with role journal, scoped memories, and ready frontier tasks.     |
 

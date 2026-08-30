@@ -5,3 +5,4 @@
 
 export * from "./kv/index.ts";
 export * from "./memory_search.ts";
+export * from "./resolvers.ts";

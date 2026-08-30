@@ -4,7 +4,7 @@
 
 import type { Workflow, WorkflowId, WorkflowNode } from "../types.ts";
 import { getKv, listEntries, type ListOptions, MAX_ATOMIC_OPS, resolveUserId } from "./client.ts";
-import { invalidateWorkflowCache } from "../../mcp/resolvers.ts";
+import { invalidateWorkflowCache } from "../resolvers.ts";
 
 export async function saveWorkflow(workflow: Workflow, userId?: string): Promise<void> {
   const uid = resolveUserId(userId || workflow.userId);

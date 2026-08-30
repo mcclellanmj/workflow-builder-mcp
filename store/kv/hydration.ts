@@ -12,7 +12,7 @@ import {
 } from "./tasks.ts";
 import { listNodes } from "./nodes.ts";
 import { listEdges } from "./edges.ts";
-import { resolveWorkflow } from "../../mcp/resolvers.ts";
+import { resolveWorkflow } from "../resolvers.ts";
 import { validateGraph } from "../../validation/graph.ts";
 import type {
   DependencyType,

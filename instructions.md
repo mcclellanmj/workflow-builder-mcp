@@ -84,18 +84,18 @@ flowchart TD
   all satisfied.
 - Automatically auto-closes parent Epics when all child tasks are completed!
 
-### Step 3: Inspecting Hierarchy (`workflow_tree`)
+### Step 5: Inspecting Hierarchy (`workflow_tree`)
 
 - **Call**: `workflow_tree({ workflow: "review-workflow", depth: 3 })`
 - Instantly returns a recursive hierarchical tree diagram of parent workflows and all nested child
   subworkflows.
 
-### Step 4: Cross-Workflow Search (`workflow_search`)
+### Step 6: Cross-Workflow Search (`workflow_search`)
 
 - **Call**: `workflow_search({ query: "authentication OR passkey", includeDescriptions: true })`
 - Instantly searches across standalone workflows and child subworkflows with line context snippets.
 
-### Step 5: Batch Node Updates (`workflow_patch`)
+### Step 7: Batch Node Updates (`workflow_patch`)
 
 - **Call**:
   ```typescript
@@ -108,8 +108,6 @@ flowchart TD
   });
   ```
 - Applies multi-node edits atomically in a single roundtrip.
-
----
 
 ---
 
@@ -204,6 +202,7 @@ Memories persist institutional knowledge across runs, agent crashes, and session
 | **Nodes**                      | `node_add`                     | Add a node to a workflow.                                     | `workflow`, `name`, `type`, `description?`, `config?`                            |
 | **Nodes**                      | `node_edit`                    | Modify an existing node.                                      | `workflow`, `node`, `name?`, `description?`, `config?`                           |
 | **Nodes**                      | `node_delete`                  | Delete a node and connected edges.                            | `workflow`, `node`                                                               |
+| **Nodes**                      | `node_get`                     | Retrieve detailed node info.                                  | `workflow`, `node`, `format?`                                                    |
 | **Nodes**                      | `node_list`                    | List all nodes in a workflow.                                 | `workflow`                                                                       |
 | **Edges**                      | `node_connect`                 | Connect two nodes with optional condition.                    | `workflow`, `fromNode`, `toNode`, `condition?`                                   |
 | **Edges**                      | `node_disconnect`              | Remove edge between two nodes.                                | `workflow`, `fromNode`, `toNode`                                                 |
@@ -213,6 +212,7 @@ Memories persist institutional knowledge across runs, agent crashes, and session
 | **Subworkflows & Portability** | `workflow_export`              | Export workflow bundle JSON.                                  | `workflow`, `includeSubworkflows?`, `filePath?`                                  |
 | **Subworkflows & Portability** | `workflow_import`              | Import workflow bundle JSON.                                  | `bundleData?`, `filePath?`, `overwrite?`, `clone?`                               |
 | **Tasks**                      | `task_create`                  | Create an assignable work unit or epic.                       | `title`, `type?`, `description?`, `role?`, `workflow?`, `node?`, `parentTaskId?` |
+| **Tasks**                      | `task_create_batch`            | Batch create multiple tasks and wire dependencies.            | `tasks: [{ title, role?, priority?, dependsOnTitles? }]`, `parentTaskId?`        |
 | **Tasks**                      | `task_list`                    | List tasks with status filter and summary counts.             | `workflow?`, `executionId?`, `status?`, `role?`, `assignee?`, `type?`            |
 | **Tasks**                      | `task_get`                     | Get task details, dependencies, and child subtasks.           | `task`, `includeDependencies?`, `includeChildren?`                               |
 | **Tasks**                      | `task_update`                  | Modify task metadata and append to context notes.             | `task`, `title?`, `description?`, `status?`, `priority?`, `context?`             |
@@ -220,6 +220,7 @@ Memories persist institutional knowledge across runs, agent crashes, and session
 | **Tasks**                      | `task_ready`                   | Compute claimable frontier (zero open blockers).              | `workflow?`, `role?`, `includeEpics?`, `limit?`                                  |
 | **Tasks**                      | `task_claim`                   | Atomically lock a task to an assignee.                        | `task`, `assignee`                                                               |
 | **Tasks**                      | `task_depend`                  | Add or remove dependency edges between tasks.                 | `action`, `fromTask`, `toTask`, `type?`                                          |
+| **Tasks**                      | `task_comment`                 | Append a lightweight log comment (max 256 chars).             | `task`, `content`, `author?`                                                     |
 | **Roles**                      | `role_create`                  | Define a user-defined role.                                   | `name`, `description?`                                                           |
 | **Roles**                      | `role_list`                    | List registered user-defined roles.                           | `format?`                                                                        |
 | **Journal**                    | `journal_write`                | Save single-entry role shutdown snapshot.                     | `role`, `entry`, `writtenBy?`                                                    |
@@ -228,5 +229,6 @@ Memories persist institutional knowledge across runs, agent crashes, and session
 | **Memory**                     | `memory_list`                  | List memory summaries with lastAccessed & accessCount.        | `workflow?`, `node?`, `role?`, `tags?`, `format?`                                |
 | **Memory**                     | `memory_recall`                | Retrieve full content and log access record.                  | `key`, `scope?`, `workflow?`, `node?`, `role?`, `accessedBy?`                    |
 | **Memory**                     | `memory_delete`                | Delete memory and return lifetime accessCount.                | `key`, `scope?`, `workflow?`, `node?`, `role?`                                   |
+| **Memory**                     | `memory_search`                | Full-text search across memories with BM25 vector ranking.    | `query`, `scope?`, `workflow?`, `role?`, `tags?`, `limit?`                       |
 | **Handoff**                    | `task_handoff`                 | Transfer work preserving context and rejected approaches.     | `task`, `reason`, `contextSummary?`, `rejectedApproaches?`, `toRole?`            |
 | **Context**                    | `context_prime`                | Bootstrap agent session with journal, memories, and frontier. | `workflow?`, `executionId?`, `taskId?`, `role?`, `tokenBudget?`                  |
