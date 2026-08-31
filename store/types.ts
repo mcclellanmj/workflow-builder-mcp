@@ -304,6 +304,11 @@ export interface Task {
   /** Custom metadata key-values. */
   metadata?: Record<string, unknown>;
 
+  /** Multi-stage pipeline execution state when task is managed by a flow pipeline. */
+  pipeline?: TaskPipeline;
+  /** Log of formal acceptance notes from completed stages or final review. */
+  acceptanceNotes?: string[];
+
   closedReason?: string;
   /** Chronological log of short comments (max 256 chars each). Guaranteed to be an array. */
   comments: TaskComment[];
@@ -417,3 +422,106 @@ export interface HandoffRecord {
   rejectedApproaches: string[];
   timestamp: string;
 }
+
+// ---------------------------------------------------------------------------
+// Task Pipelines & Flow Templates
+// ---------------------------------------------------------------------------
+
+/** Valid actions for transitioning between stages in a task pipeline. */
+export type StageAction = "advance" | "reject" | "escalate" | "delegate";
+
+/** Status lifecycle of a stage within a task pipeline. */
+export type StageStatus = "pending" | "active" | "completed" | "skipped" | "rejected";
+
+/** Policy dictating how state and history roll back when a stage is rejected. */
+export type RejectionPolicy = "rollback_to_stage" | "restart_stage" | "reset_all_subsequent";
+
+/** Transition rule specifying valid paths out of a pipeline stage. */
+export interface StageTransitionRule {
+  targetStageId: string;
+  action: StageAction;
+  allowedRoles?: string[];
+  requiresReviewApproval?: boolean;
+}
+
+/** A single stage in a multi-stage task pipeline. */
+export interface TaskPipelineStage {
+  id: string;
+  name: string;
+  role: string;
+  description?: string;
+  allowedTransitions: StageTransitionRule[];
+  requiredFields?: string[];
+  validationRules?: {
+    minCommentLength?: number;
+    requireStructuredHandoff?: boolean;
+    requireRejectedApproachesOnReject?: boolean;
+    customGuards?: string[];
+  };
+  status: StageStatus;
+  assignee?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+/** Immutable audit entry recording every transition event in a pipeline. */
+export interface PipelineTransitionAuditRecord {
+  id: string;
+  timestamp: string;
+  fromStageId: string;
+  toStageId: string;
+  fromRole: string;
+  toRole: string;
+  triggeredBy: string;
+  action: StageAction | "skip" | "emergency_override" | "insert_stage";
+  reason: string;
+  structuredNotes?: {
+    contextSummary?: string;
+    acceptanceCriteriaMet?: string[];
+    rejectionReasons?: string[];
+    rejectedApproaches?: string[];
+    managerOverrideJustification?: string;
+  };
+  guardResults?: Array<{ guard: string; passed: boolean; details?: string }>;
+}
+
+/** Multi-stage pipeline state embedded inside a Task. */
+export interface TaskPipeline {
+  templateId?: string;
+  templateVersion?: string;
+  strictMode?: boolean;
+  currentStageId: string;
+  currentStageIndex: number;
+  stages: TaskPipelineStage[];
+  rejectionLoopPolicy?: RejectionPolicy;
+  maxRejectionCycles?: number;
+  rejectionCount?: number;
+  history?: PipelineTransitionAuditRecord[];
+}
+
+/** Reusable template defining a standardized multi-stage workflow pipeline. */
+export interface FlowTemplate {
+  id: string;
+  name: string;
+  description: string;
+  version: string;
+  tags: string[];
+  recommendedRoles: string[];
+  defaultRejectionPolicy: RejectionPolicy;
+  defaultMaxRejections: number;
+  stages: Array<Omit<TaskPipelineStage, "status" | "startedAt" | "completedAt" | "assignee">>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline Error Constants
+// ---------------------------------------------------------------------------
+
+export const ERR_PIPELINE_PREMATURE_CLOSE = "ERR_PIPELINE_PREMATURE_CLOSE";
+export const ERR_PIPELINE_STAGE_ROLE_MISMATCH = "ERR_PIPELINE_STAGE_ROLE_MISMATCH";
+export const ERR_PIPELINE_ROLE_MUTATION_RESTRICTED = "ERR_PIPELINE_ROLE_MUTATION_RESTRICTED";
+export const ERR_PIPELINE_INVALID_TRANSITION = "ERR_PIPELINE_INVALID_TRANSITION";
+export const ERR_PIPELINE_REJECTION_LIMIT_EXCEEDED = "ERR_PIPELINE_REJECTION_LIMIT_EXCEEDED";
+export const ERR_PIPELINE_MISSING_MANDATORY_NOTES = "ERR_PIPELINE_MISSING_MANDATORY_NOTES";
+

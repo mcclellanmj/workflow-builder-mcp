@@ -18,9 +18,9 @@ Deno.test("McpServer integration test with client over InMemoryTransport", async
       client.connect(clientTransport),
     ]);
 
-    // 1. List tools and verify all 41 tools export rich schema properties
+    // 1. List tools and verify all 47 tools export rich schema properties
     const toolList = await client.listTools();
-    assertEquals(toolList.tools.length, 41, "Expected 41 tools registered");
+    assertEquals(toolList.tools.length, 47, "Expected 47 tools registered");
     const toolNames = toolList.tools.map((t: { name: string }) => t.name);
     assert(toolNames.includes("workflow_create"));
     assert(toolNames.includes("workflow_list"));
@@ -39,10 +39,19 @@ Deno.test("McpServer integration test with client over InMemoryTransport", async
     assert(toolNames.includes("task_ready"));
     assert(toolNames.includes("task_claim"));
     assert(toolNames.includes("task_close"));
+    assert(toolNames.includes("pipeline_template_create"));
+    assert(toolNames.includes("pipeline_template_list"));
+    assert(toolNames.includes("pipeline_template_get"));
+    assert(toolNames.includes("task_pipeline_attach"));
+    assert(toolNames.includes("task_pipeline_override"));
+    assert(toolNames.includes("task_pipeline_status"));
     assert(toolNames.includes("memory_save"));
 
     for (const tool of toolList.tools) {
-      assert(tool.description && tool.description.length > 0, `Tool ${tool.name} missing description`);
+      assert(
+        tool.description && tool.description.length > 0,
+        `Tool ${tool.name} missing description`,
+      );
       // deno-lint-ignore no-explicit-any
       const schema = tool.inputSchema as any;
       if (schema) {
@@ -56,7 +65,10 @@ Deno.test("McpServer integration test with client over InMemoryTransport", async
     const memSaveTool = toolList.tools.find((t: any) => t.name === "memory_save") as any;
     assert(memSaveTool, "memory_save tool should be present");
     assert(memSaveTool.inputSchema?.properties?.roleId, "memory_save must have roleId in schema");
-    assert(memSaveTool.inputSchema?.properties?.workflowId, "memory_save must have workflowId in schema");
+    assert(
+      memSaveTool.inputSchema?.properties?.workflowId,
+      "memory_save must have workflowId in schema",
+    );
     assert(memSaveTool.inputSchema?.properties?.nodeId, "memory_save must have nodeId in schema");
     assert(memSaveTool.inputSchema?.properties?.scopeId, "memory_save must have scopeId in schema");
 

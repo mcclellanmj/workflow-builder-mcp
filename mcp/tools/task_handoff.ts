@@ -1,17 +1,28 @@
 import { z } from "zod";
-import { recordHandoff, updateTask } from "../../store/kv.ts";
-import type { Task } from "../../store/types.ts";
+import { handoffTask } from "../../store/kv.ts";
 import { createErrorResponse, defineTool, jsonResponse } from "../helpers.ts";
 import { resolveTask } from "./task_helpers.ts";
 
 const TaskHandoffSchema = z.object({
   task: z.string().min(1).optional().describe("The task ID to hand off."),
   taskId: z.string().min(1).optional().describe("Alias for 'task'. The task ID to hand off."),
+  action: z.enum(["advance", "reject", "escalate", "delegate"]).optional().describe(
+    "Pipeline transition action ('advance', 'reject', 'escalate', 'delegate'). Defaults to 'advance'.",
+  ),
+  targetStageId: z.string().optional().describe(
+    "Target pipeline stage ID for custom routing or rollback.",
+  ),
   reason: z.string().min(1).describe(
-    "The reason for the handoff (e.g. shift change, domain specialization, escalation).",
+    "The reason for the handoff or pipeline transition (e.g. stage complete, review rejected, shift change).",
   ),
   contextSummary: z.string().optional().describe(
     "Summary of progress, decisions, and current state to preserve for the next agent.",
+  ),
+  acceptanceNotes: z.union([z.string(), z.array(z.string())]).optional().describe(
+    "Acceptance criteria met or notes from stage execution.",
+  ),
+  rejectionReasons: z.array(z.string()).optional().describe(
+    "List of rejection reasons when action is 'reject'.",
   ),
   rejectedApproaches: z.array(z.string()).optional().describe(
     "List of approaches that failed or were rejected to avoid repeating mistakes.",
@@ -22,6 +33,9 @@ const TaskHandoffSchema = z.object({
   toRole: z.string().optional().describe(
     "Optional role to reassign the task to (e.g. 'qa', 'security', 'frontend').",
   ),
+  managerOverrideJustification: z.string().optional().describe(
+    "Justification when performing a manager override transition.",
+  ),
 }).refine((data) => data.task || data.taskId, {
   message: "Either 'task' or 'taskId' must be provided.",
 });
@@ -29,10 +43,23 @@ const TaskHandoffSchema = z.object({
 export const taskHandoffTool = defineTool({
   name: "task_handoff",
   description:
-    "Transfers a task between agents or roles while preserving accumulated context and rejected approaches. Updates ownership and creates an audit handoff record.",
+    "Transfers a task between agents or roles while preserving accumulated context and rejected approaches. Supports multi-stage pipeline advancement and rejection loops.",
   schema: TaskHandoffSchema,
   execute: async (
-    { task, taskId, reason, contextSummary, rejectedApproaches, toAssignee, toRole },
+    {
+      task,
+      taskId,
+      action,
+      targetStageId,
+      reason,
+      contextSummary,
+      acceptanceNotes,
+      rejectionReasons,
+      rejectedApproaches,
+      toAssignee,
+      toRole,
+      managerOverrideJustification,
+    },
   ) => {
     const targetTaskId = (task ?? taskId)!.trim();
     const existingTask = await resolveTask(targetTaskId);
@@ -40,61 +67,25 @@ export const taskHandoffTool = defineTool({
       return createErrorResponse(`Task not found: ${targetTaskId}`);
     }
 
-    // 1. Context preservation: append contextSummary to task.context
-    let newContext = existingTask.context;
-    if (contextSummary && contextSummary.trim()) {
-      newContext = existingTask.context && existingTask.context.trim()
-        ? `${existingTask.context.trim()}\n\n${contextSummary.trim()}`
-        : contextSummary.trim();
-    }
-
-    // 2. Append rejected approaches
-    let newRejectedApproaches = existingTask.rejectedApproaches
-      ? [...existingTask.rejectedApproaches]
-      : [];
-    if (rejectedApproaches && rejectedApproaches.length > 0) {
-      newRejectedApproaches = [...newRejectedApproaches, ...rejectedApproaches];
-    }
-
-    // 3. Record handoff record
-    const handoffRecord = await recordHandoff({
+    const result = await handoffTask({
       taskId: existingTask.id,
-      fromAssignee: existingTask.assignee || "unassigned",
-      toAssignee: toAssignee ? toAssignee.trim() : undefined,
-      toRole: toRole ? toRole.trim() : undefined,
+      action,
+      targetStageId,
+      fromAssignee: existingTask.assignee,
+      toAssignee,
+      toRole,
       reason,
-      contextSummary: contextSummary ?? "",
-      rejectedApproaches: rejectedApproaches ?? [],
+      contextSummary,
+      acceptanceNotes,
+      rejectionReasons,
+      rejectedApproaches,
+      managerOverrideJustification,
     });
 
-    // 4. Update task
-    const updates: Partial<Task> = {
-      context: newContext,
-      rejectedApproaches: newRejectedApproaches,
-    };
-
-    if (toAssignee && toAssignee.trim()) {
-      updates.assignee = toAssignee.trim();
-      updates.claimedAt = new Date().toISOString();
-      updates.status = "claimed";
-    } else {
-      updates.assignee = undefined;
-      updates.claimedAt = undefined;
-      // Releasing to queue - if currently claimed or in_progress, transition to open
-      if (existingTask.status === "claimed" || existingTask.status === "in_progress") {
-        updates.status = "open";
-      }
-    }
-
-    if (toRole && toRole.trim()) {
-      updates.role = toRole.trim();
-    }
-
-    const updatedTask = await updateTask(existingTask.id, updates);
-
     return jsonResponse({
-      task: updatedTask,
-      handoffRecord,
+      task: result.task,
+      handoffRecord: result.handoffRecord,
+      auditRecord: result.auditRecord,
     });
   },
 });

@@ -34,6 +34,9 @@ const TaskCreateSchema = z.object({
   nodeId: z.string().optional().describe(
     "Alias for 'node'.",
   ),
+  pipelineTemplateId: z.string().optional().describe(
+    "Optional FlowTemplate ID (e.g. 'unity-dev-playtest-qa', 'code-review-audit', 'hotfix-fast-track', 'research-spec-impl') to initialize a multi-stage pipeline.",
+  ),
 });
 
 export const createTaskTool = defineTool({
@@ -53,6 +56,7 @@ export const createTaskTool = defineTool({
     executionId,
     node,
     nodeId,
+    pipelineTemplateId,
   }) => {
     let actualWorkflowId = workflowId ?? workflow;
     if (actualWorkflowId) {
@@ -89,6 +93,7 @@ export const createTaskTool = defineTool({
       workflowId: actualWorkflowId,
       executionId,
       nodeId: actualNodeId,
+      pipelineTemplateId,
     });
 
     return jsonResponse({ task });

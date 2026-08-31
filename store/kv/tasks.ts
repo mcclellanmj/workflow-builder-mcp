@@ -5,18 +5,34 @@
 import type {
   DependencyType,
   ExecutionId,
+  HandoffRecord,
   NodeId,
+  PipelineTransitionAuditRecord,
+  StageAction,
+  StageTransitionRule,
   Task,
   TaskComment,
   TaskDependency,
   TaskId,
+  TaskPipeline,
+  TaskPipelineStage,
   TaskPriority,
   TaskStatus,
   TaskType,
   WorkflowId,
 } from "../types.ts";
+import {
+  ERR_PIPELINE_INVALID_TRANSITION,
+  ERR_PIPELINE_MISSING_MANDATORY_NOTES,
+  ERR_PIPELINE_PREMATURE_CLOSE,
+  ERR_PIPELINE_REJECTION_LIMIT_EXCEEDED,
+  ERR_PIPELINE_ROLE_MUTATION_RESTRICTED,
+  ERR_PIPELINE_STAGE_ROLE_MISMATCH,
+} from "../types.ts";
 import { getKv, MAX_ATOMIC_OPS, MAX_GET_MANY_KEYS, resolveUserId } from "./client.ts";
 import { ensureRole } from "./roles.ts";
+import { getFlowTemplate, instantiatePipelineFromTemplate } from "./pipeline_templates.ts";
+import { recordHandoff } from "./handoffs.ts";
 
 /** Input payload for creating a new task. */
 export interface CreateTaskInput {
@@ -38,6 +54,9 @@ export interface CreateTaskInput {
   rejectedApproaches?: string[];
   inputs?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+  pipelineTemplateId?: string;
+  pipeline?: TaskPipeline;
+  acceptanceNotes?: string[];
   closedReason?: string;
   comments?: TaskComment[];
   createdAt?: string;
@@ -97,9 +116,26 @@ export async function createTask(
   const uid = resolveUserId(userId || taskInput.userId);
   const kv = await getKv();
 
+  let pipeline = taskInput.pipeline;
+  if (taskInput.pipelineTemplateId && !pipeline) {
+    const template = await getFlowTemplate(taskInput.pipelineTemplateId, uid);
+    if (!template) {
+      throw new Error(`Pipeline template not found: ${taskInput.pipelineTemplateId}`);
+    }
+    pipeline = instantiatePipelineFromTemplate(template);
+  }
+
+  let role = taskInput.role?.trim();
+  if (!role && pipeline && pipeline.stages && pipeline.stages.length > 0) {
+    const activeStage = pipeline.stages[pipeline.currentStageIndex ?? 0];
+    if (activeStage?.role) {
+      role = activeStage.role;
+    }
+  }
+
   // If role is set, auto-ensure role
-  if (taskInput.role && taskInput.role.trim().length > 0) {
-    await ensureRole(taskInput.role.trim(), uid);
+  if (role && role.length > 0) {
+    await ensureRole(role, uid);
   }
 
   // Generate a unique ID if not provided, ensuring no collision
@@ -126,6 +162,9 @@ export async function createTask(
     id,
     userId: uid,
     title,
+    role: role || undefined,
+    pipeline,
+    acceptanceNotes: taskInput.acceptanceNotes ?? [],
     description: taskInput.description ?? "",
     status: taskInput.status || (taskInput.assignee ? "claimed" : "open"),
     type: taskInput.type || "task",
@@ -176,13 +215,41 @@ export async function createTasks(
   const uid = resolveUserId(userId || taskInputs[0]?.userId);
   const kv = await getKv();
 
-  // Auto-ensure distinct roles
+  // Auto-resolve pipelines and roles
+  const preparedInputs: Array<
+    CreateTaskInput & { resolvedPipeline?: TaskPipeline; resolvedRole?: string }
+  > = [];
   const roles = new Set<string>();
+
   for (const input of taskInputs) {
-    if (input.role && input.role.trim().length > 0) {
-      roles.add(input.role.trim());
+    let pipeline = input.pipeline;
+    if (input.pipelineTemplateId && !pipeline) {
+      const template = await getFlowTemplate(input.pipelineTemplateId, uid);
+      if (!template) {
+        throw new Error(`Pipeline template not found: ${input.pipelineTemplateId}`);
+      }
+      pipeline = instantiatePipelineFromTemplate(template);
     }
+
+    let role = input.role?.trim();
+    if (!role && pipeline && pipeline.stages && pipeline.stages.length > 0) {
+      const activeStage = pipeline.stages[pipeline.currentStageIndex ?? 0];
+      if (activeStage?.role) {
+        role = activeStage.role;
+      }
+    }
+
+    if (role && role.length > 0) {
+      roles.add(role);
+    }
+
+    preparedInputs.push({
+      ...input,
+      resolvedPipeline: pipeline,
+      resolvedRole: role,
+    });
   }
+
   for (const role of roles) {
     await ensureRole(role, uid);
   }
@@ -192,7 +259,7 @@ export async function createTasks(
   let atomic = kv.atomic();
   let opCount = 0;
 
-  for (const taskInput of taskInputs) {
+  for (const taskInput of preparedInputs) {
     const title = taskInput.title?.trim();
     if (!title) {
       throw new Error("Task title cannot be empty");
@@ -204,6 +271,9 @@ export async function createTasks(
       id,
       userId: uid,
       title,
+      role: taskInput.resolvedRole || undefined,
+      pipeline: taskInput.resolvedPipeline,
+      acceptanceNotes: taskInput.acceptanceNotes ?? [],
       description: taskInput.description ?? "",
       status: taskInput.status || (taskInput.assignee ? "claimed" : "open"),
       type: taskInput.type || "task",
@@ -565,6 +635,7 @@ export async function updateTask(
   taskId: TaskId,
   updates: Partial<Task>,
   userId?: string,
+  options?: { allowPipelineOverride?: boolean },
 ): Promise<Task> {
   const uid = resolveUserId(userId);
   const kv = await getKv();
@@ -579,6 +650,14 @@ export async function updateTask(
     throw new Error(`Task not found: ${taskId}`);
   }
   const existing = entry.value;
+
+  if (existing.pipeline && !options?.allowPipelineOverride) {
+    if (updates.role !== undefined && updates.role !== existing.role) {
+      throw new Error(
+        `${ERR_PIPELINE_ROLE_MUTATION_RESTRICTED}: Cannot directly mutate role on pipelined task '${taskId}'. Role is determined by the active pipeline stage. Use handoffTask or overrideTaskPipeline.`,
+      );
+    }
+  }
 
   if (updates.role && updates.role.trim().length > 0 && updates.role !== existing.role) {
     await ensureRole(updates.role.trim(), uid);
@@ -1077,6 +1156,7 @@ export async function claimTask(
   taskId: TaskId,
   assignee: string,
   userId?: string,
+  claimantRole?: string,
 ): Promise<Task> {
   const trimmedAssignee = assignee.trim();
   if (!trimmedAssignee) {
@@ -1098,6 +1178,41 @@ export async function claimTask(
     );
   }
 
+  const now = new Date().toISOString();
+  let updatedPipeline = current.pipeline;
+
+  // Enforce pipeline role matching if task is pipelined
+  if (current.pipeline) {
+    const currentStageIndex = current.pipeline.currentStageIndex ?? 0;
+    const activeStage = current.pipeline.stages[currentStageIndex] ||
+      current.pipeline.stages.find((s) => s.id === current.pipeline!.currentStageId);
+
+    if (activeStage) {
+      if (claimantRole && claimantRole.trim() && claimantRole.trim() !== activeStage.role) {
+        throw new Error(
+          `${ERR_PIPELINE_STAGE_ROLE_MISMATCH}: Task '${taskId}' active stage '${activeStage.id}' requires role '${activeStage.role}', but claimant specified role '${claimantRole.trim()}'`,
+        );
+      }
+
+      const updatedStages = current.pipeline.stages.map((st, idx) => {
+        if (idx === currentStageIndex) {
+          return {
+            ...st,
+            status: "active" as const,
+            assignee: trimmedAssignee,
+            startedAt: st.startedAt || now,
+          };
+        }
+        return st;
+      });
+
+      updatedPipeline = {
+        ...current.pipeline,
+        stages: updatedStages,
+      };
+    }
+  }
+
   // If currently blocked, check if blockers have resolved
   if (current.status === "blocked") {
     const blockers = await getDependencies(taskId, "blocked-by", uid);
@@ -1113,13 +1228,13 @@ export async function claimTask(
     }
   }
 
-  const now = new Date().toISOString();
   const updated: Task = {
     ...current,
     status: "claimed",
     assignee: trimmedAssignee,
     claimedAt: now,
     updatedAt: now,
+    pipeline: updatedPipeline,
   };
 
   const atomic = kv.atomic()
@@ -1148,6 +1263,7 @@ export async function closeTask(
   taskId: TaskId,
   reason?: string,
   userId?: string,
+  options?: { allowPipelineOverride?: boolean },
 ): Promise<{ task: Task; unblockedTasks: Task[] }> {
   const uid = resolveUserId(userId);
   const task = await getTask(taskId, uid);
@@ -1155,12 +1271,56 @@ export async function closeTask(
     throw new Error(`Task not found: ${taskId}`);
   }
 
+  // Pipeline check
+  if (task.pipeline && !options?.allowPipelineOverride) {
+    const currentStageIndex = task.pipeline.currentStageIndex ?? 0;
+    const totalStages = task.pipeline.stages.length;
+    if (currentStageIndex < totalStages - 1) {
+      const currentStage = task.pipeline.stages[currentStageIndex];
+      throw new Error(
+        `${ERR_PIPELINE_PREMATURE_CLOSE}: Cannot close task '${taskId}' at non-terminal pipeline stage '${
+          currentStage?.name || currentStage?.id || currentStageIndex
+        }' (${
+          currentStageIndex + 1
+        }/${totalStages}). Task must progress through all pipeline stages or be overridden by a manager.`,
+      );
+    }
+  }
+
   const now = new Date().toISOString();
+  let updatedPipeline = task.pipeline;
+  let updatedAcceptanceNotes = task.acceptanceNotes;
+
+  if (task.pipeline) {
+    const currentStageIndex = task.pipeline.currentStageIndex ?? (task.pipeline.stages.length - 1);
+    const updatedStages = task.pipeline.stages.map((st, idx) => {
+      if (idx === currentStageIndex) {
+        return {
+          ...st,
+          status: "completed" as const,
+          completedAt: now,
+        };
+      }
+      return st;
+    });
+
+    updatedPipeline = {
+      ...task.pipeline,
+      stages: updatedStages,
+    };
+
+    if (reason && reason.trim()) {
+      updatedAcceptanceNotes = [...(task.acceptanceNotes ?? []), reason.trim()];
+    }
+  }
+
   const closedTaskData: Task = {
     ...task,
     status: "closed",
     closedReason: reason,
     closedAt: now,
+    pipeline: updatedPipeline,
+    acceptanceNotes: updatedAcceptanceNotes,
   };
   // Move task to closed namespace with updated fields
   await moveTaskToClosed(uid, closedTaskData);
@@ -1330,4 +1490,598 @@ export async function getTaskComments(
     throw new Error(`Task not found: ${taskId}`);
   }
   return task.comments ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Task Handoffs & Multi-Stage Pipeline Transitions
+// ---------------------------------------------------------------------------
+
+export interface HandoffTaskInput {
+  taskId: TaskId;
+  action?: StageAction;
+  targetStageId?: string;
+  fromAssignee?: string;
+  toAssignee?: string;
+  toRole?: string;
+  reason: string;
+  contextSummary?: string;
+  acceptanceNotes?: string | string[];
+  rejectionReasons?: string[];
+  rejectedApproaches?: string[];
+  managerOverrideJustification?: string;
+}
+
+export interface HandoffTaskResult {
+  task: Task;
+  handoffRecord: HandoffRecord;
+  auditRecord?: PipelineTransitionAuditRecord;
+}
+
+/**
+ * Transfers a task between agents or roles, handling both standard unpipelined handoffs
+ * and multi-stage pipeline transitions (advances, rejection loopbacks, circuit breaker, audit logging).
+ */
+export async function handoffTask(
+  input: HandoffTaskInput,
+  userId?: string,
+): Promise<HandoffTaskResult> {
+  const targetTaskId = input.taskId?.trim();
+  if (!targetTaskId) {
+    throw new Error("Task ID cannot be empty");
+  }
+  const reason = input.reason?.trim();
+  if (!reason) {
+    throw new Error("Handoff reason cannot be empty");
+  }
+
+  const uid = resolveUserId(userId);
+  const task = await getTask(targetTaskId, uid);
+  if (!task) {
+    throw new Error(`Task not found: ${targetTaskId}`);
+  }
+
+  const now = new Date().toISOString();
+
+  // -------------------------------------------------------------------------
+  // Case 1: Unpipelined Task (100% Backward Compatible)
+  // -------------------------------------------------------------------------
+  if (!task.pipeline) {
+    let newContext = task.context;
+    if (input.contextSummary && input.contextSummary.trim()) {
+      newContext = task.context && task.context.trim()
+        ? `${task.context.trim()}\n\n${input.contextSummary.trim()}`
+        : input.contextSummary.trim();
+    }
+
+    let newRejectedApproaches = task.rejectedApproaches ? [...task.rejectedApproaches] : [];
+    if (input.rejectedApproaches && input.rejectedApproaches.length > 0) {
+      newRejectedApproaches = [...newRejectedApproaches, ...input.rejectedApproaches];
+    }
+
+    const handoffRecord = await recordHandoff({
+      taskId: task.id,
+      fromAssignee: input.fromAssignee || task.assignee || "unassigned",
+      toAssignee: input.toAssignee ? input.toAssignee.trim() : undefined,
+      toRole: input.toRole ? input.toRole.trim() : undefined,
+      reason,
+      contextSummary: input.contextSummary ?? "",
+      rejectedApproaches: input.rejectedApproaches ?? [],
+      timestamp: now,
+    }, uid);
+
+    const updates: Partial<Task> = {
+      context: newContext,
+      rejectedApproaches: newRejectedApproaches,
+    };
+
+    if (input.toAssignee && input.toAssignee.trim()) {
+      updates.assignee = input.toAssignee.trim();
+      updates.claimedAt = now;
+      updates.status = "claimed";
+    } else {
+      updates.assignee = undefined;
+      updates.claimedAt = undefined;
+      if (task.status === "claimed" || task.status === "in_progress") {
+        updates.status = "open";
+      }
+    }
+
+    if (input.toRole && input.toRole.trim()) {
+      updates.role = input.toRole.trim();
+    }
+
+    const updatedTask = await updateTask(task.id, updates, uid);
+    return { task: updatedTask, handoffRecord };
+  }
+
+  // -------------------------------------------------------------------------
+  // Case 2: Pipelined Task Multi-Stage Transition & Guards
+  // -------------------------------------------------------------------------
+  const action: StageAction = input.action || "advance";
+  const currentStageIndex = task.pipeline.currentStageIndex ?? 0;
+  const currentStage = task.pipeline.stages[currentStageIndex];
+  if (!currentStage) {
+    throw new Error(
+      `Current pipeline stage index ${currentStageIndex} not found in task ${task.id}`,
+    );
+  }
+
+  let nextStageIndex = currentStageIndex;
+  let nextStageId = currentStage.id;
+  let newRejectionCount = task.pipeline.rejectionCount ?? 0;
+  let updatedStages = [...task.pipeline.stages];
+  let targetRole = input.toRole ? input.toRole.trim() : "";
+
+  // 1. Advance Action
+  if (action === "advance") {
+    if (currentStage.allowedTransitions && currentStage.allowedTransitions.length > 0) {
+      const allowedAdvance = currentStage.allowedTransitions.filter((t) => t.action === "advance");
+      if (allowedAdvance.length > 0 && input.targetStageId) {
+        const match = allowedAdvance.find((t) => t.targetStageId === input.targetStageId);
+        if (!match) {
+          throw new Error(
+            `${ERR_PIPELINE_INVALID_TRANSITION}: Cannot advance from stage '${currentStage.id}' to '${input.targetStageId}'. Allowed targets: ${
+              allowedAdvance.map((t) => t.targetStageId).join(", ")
+            }`,
+          );
+        }
+      }
+    }
+
+    if (input.targetStageId) {
+      const foundIdx = task.pipeline.stages.findIndex((s) => s.id === input.targetStageId);
+      if (foundIdx === -1) {
+        throw new Error(
+          `${ERR_PIPELINE_INVALID_TRANSITION}: Target stage '${input.targetStageId}' not found in pipeline`,
+        );
+      }
+      nextStageIndex = foundIdx;
+    } else {
+      nextStageIndex = currentStageIndex + 1;
+    }
+
+    if (nextStageIndex >= task.pipeline.stages.length) {
+      throw new Error(
+        `${ERR_PIPELINE_INVALID_TRANSITION}: Cannot advance beyond final pipeline stage '${
+          currentStage.name || currentStage.id
+        }'`,
+      );
+    }
+
+    const nextStage = task.pipeline.stages[nextStageIndex];
+    nextStageId = nextStage.id;
+    if (!targetRole) {
+      targetRole = nextStage.role;
+    }
+
+    updatedStages = task.pipeline.stages.map((st, idx) => {
+      if (idx === currentStageIndex) {
+        return {
+          ...st,
+          status: "completed" as const,
+          completedAt: now,
+        };
+      } else if (idx === nextStageIndex) {
+        return {
+          ...st,
+          status: "active" as const,
+          startedAt: now,
+          completedAt: undefined,
+          assignee: input.toAssignee ? input.toAssignee.trim() : undefined,
+        };
+      }
+      return st;
+    });
+  } // 2. Reject Action
+  else if (action === "reject") {
+    const hasRejectionReasons = (input.rejectionReasons && input.rejectionReasons.length > 0) ||
+      (reason.length > 0);
+    if (!hasRejectionReasons) {
+      throw new Error(
+        `${ERR_PIPELINE_MISSING_MANDATORY_NOTES}: Rejection requires rejection reasons or detailed reason`,
+      );
+    }
+
+    if (
+      currentStage.validationRules?.requireRejectedApproachesOnReject &&
+      (!input.rejectedApproaches || input.rejectedApproaches.length === 0)
+    ) {
+      throw new Error(
+        `${ERR_PIPELINE_MISSING_MANDATORY_NOTES}: Current stage '${currentStage.id}' requires rejected approaches to be documented upon rejection`,
+      );
+    }
+
+    // Circuit Breaker
+    const maxRejections = task.pipeline.maxRejectionCycles ?? 3;
+    if (newRejectionCount >= maxRejections) {
+      throw new Error(
+        `${ERR_PIPELINE_REJECTION_LIMIT_EXCEEDED}: Task '${task.id}' exceeded maximum rejection limit (${newRejectionCount}/${maxRejections}). Manager intervention required.`,
+      );
+    }
+    newRejectionCount += 1;
+
+    const policy = task.pipeline.rejectionLoopPolicy || "rollback_to_stage";
+
+    if (input.targetStageId) {
+      const foundIdx = task.pipeline.stages.findIndex((s) => s.id === input.targetStageId);
+      if (foundIdx === -1) {
+        throw new Error(
+          `${ERR_PIPELINE_INVALID_TRANSITION}: Rejection target stage '${input.targetStageId}' not found in pipeline`,
+        );
+      }
+      nextStageIndex = foundIdx;
+    } else if (policy === "restart_stage") {
+      nextStageIndex = currentStageIndex;
+    } else {
+      // rollback_to_stage or reset_all_subsequent
+      nextStageIndex = Math.max(0, currentStageIndex - 1);
+    }
+
+    const targetStage = task.pipeline.stages[nextStageIndex];
+    nextStageId = targetStage.id;
+    if (!targetRole) {
+      targetRole = targetStage.role;
+    }
+
+    updatedStages = task.pipeline.stages.map((st, idx) => {
+      if (idx === currentStageIndex) {
+        return {
+          ...st,
+          status: (idx === nextStageIndex ? "active" : "rejected") as TaskPipelineStage["status"],
+          startedAt: idx === nextStageIndex ? now : st.startedAt,
+          completedAt: idx === nextStageIndex ? undefined : now,
+          assignee: idx === nextStageIndex
+            ? (input.toAssignee ? input.toAssignee.trim() : undefined)
+            : st.assignee,
+        };
+      } else if (idx === nextStageIndex) {
+        return {
+          ...st,
+          status: "active" as const,
+          startedAt: now,
+          completedAt: undefined,
+          assignee: input.toAssignee ? input.toAssignee.trim() : undefined,
+        };
+      } else if (policy === "reset_all_subsequent" && idx > nextStageIndex) {
+        return {
+          ...st,
+          status: "pending" as const,
+          startedAt: undefined,
+          completedAt: undefined,
+          assignee: undefined,
+        };
+      }
+      return st;
+    });
+  } // 3. Escalate / Delegate Action
+  else {
+    if (!targetRole) {
+      targetRole = currentStage.role;
+    }
+    if (input.toAssignee) {
+      updatedStages = task.pipeline.stages.map((st, idx) => {
+        if (idx === currentStageIndex) {
+          return {
+            ...st,
+            assignee: input.toAssignee ? input.toAssignee.trim() : undefined,
+          };
+        }
+        return st;
+      });
+    }
+  }
+
+  // Acceptance notes
+  const accNotesList: string[] = [];
+  if (input.acceptanceNotes) {
+    if (Array.isArray(input.acceptanceNotes)) {
+      accNotesList.push(...input.acceptanceNotes.filter((n) => n && n.trim()));
+    } else if (input.acceptanceNotes.trim()) {
+      accNotesList.push(input.acceptanceNotes.trim());
+    }
+  }
+
+  // Create Audit Record
+  const auditRecord: PipelineTransitionAuditRecord = {
+    id: `aud-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`,
+    timestamp: now,
+    fromStageId: currentStage.id,
+    toStageId: nextStageId,
+    fromRole: currentStage.role,
+    toRole: targetRole,
+    triggeredBy: input.fromAssignee || task.assignee || "system",
+    action,
+    reason,
+    structuredNotes: {
+      contextSummary: input.contextSummary?.trim() || undefined,
+      acceptanceCriteriaMet: accNotesList.length > 0 ? accNotesList : undefined,
+      rejectionReasons: input.rejectionReasons && input.rejectionReasons.length > 0
+        ? input.rejectionReasons
+        : (action === "reject" ? [reason] : undefined),
+      rejectedApproaches: input.rejectedApproaches && input.rejectedApproaches.length > 0
+        ? input.rejectedApproaches
+        : undefined,
+      managerOverrideJustification: input.managerOverrideJustification?.trim() || undefined,
+    },
+  };
+
+  const updatedPipeline: TaskPipeline = {
+    ...task.pipeline,
+    currentStageId: nextStageId,
+    currentStageIndex: nextStageIndex,
+    rejectionCount: newRejectionCount,
+    stages: updatedStages,
+    history: [...(task.pipeline.history ?? []), auditRecord],
+  };
+
+  let newContext = task.context;
+  if (input.contextSummary && input.contextSummary.trim()) {
+    const prefix = action === "reject" ? "[REJECTION NOTES]: " : "";
+    newContext = task.context && task.context.trim()
+      ? `${task.context.trim()}\n\n${prefix}${input.contextSummary.trim()}`
+      : `${prefix}${input.contextSummary.trim()}`;
+  }
+
+  let newRejectedApproaches = task.rejectedApproaches ? [...task.rejectedApproaches] : [];
+  if (input.rejectedApproaches && input.rejectedApproaches.length > 0) {
+    newRejectedApproaches = [...newRejectedApproaches, ...input.rejectedApproaches];
+  }
+
+  const newAcceptanceNotes = accNotesList.length > 0
+    ? [...(task.acceptanceNotes ?? []), ...accNotesList]
+    : task.acceptanceNotes;
+
+  const handoffRecord = await recordHandoff({
+    taskId: task.id,
+    fromAssignee: input.fromAssignee || task.assignee || "unassigned",
+    toAssignee: input.toAssignee ? input.toAssignee.trim() : undefined,
+    toRole: targetRole,
+    reason: action === "reject" ? `[REJECTED]: ${reason}` : reason,
+    contextSummary: input.contextSummary ?? "",
+    rejectedApproaches: input.rejectedApproaches ?? [],
+    timestamp: now,
+  }, uid);
+
+  const taskUpdates: Partial<Task> = {
+    role: targetRole,
+    pipeline: updatedPipeline,
+    context: newContext,
+    rejectedApproaches: newRejectedApproaches,
+    acceptanceNotes: newAcceptanceNotes,
+    assignee: input.toAssignee ? input.toAssignee.trim() : undefined,
+    claimedAt: input.toAssignee ? now : undefined,
+    status: input.toAssignee ? "claimed" : "open",
+  };
+
+  const updatedTask = await updateTask(task.id, taskUpdates, uid, {
+    allowPipelineOverride: true,
+  });
+  return { task: updatedTask, handoffRecord, auditRecord };
+}
+
+/**
+ * Attaches a FlowTemplate or custom pipeline configuration to an existing task (manager intervention).
+ */
+export async function attachPipelineToTask(
+  taskId: TaskId,
+  templateIdOrPipeline: string | TaskPipeline,
+  userId?: string,
+  justification?: string,
+): Promise<Task> {
+  const uid = resolveUserId(userId);
+  const task = await getTask(taskId, uid);
+  if (!task) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+
+  let pipeline: TaskPipeline;
+  if (typeof templateIdOrPipeline === "string") {
+    const template = await getFlowTemplate(templateIdOrPipeline, uid);
+    if (!template) {
+      throw new Error(`Flow template not found: ${templateIdOrPipeline}`);
+    }
+    pipeline = instantiatePipelineFromTemplate(template);
+  } else {
+    pipeline = templateIdOrPipeline;
+  }
+
+  const now = new Date().toISOString();
+  const activeStage = pipeline.stages[pipeline.currentStageIndex ?? 0];
+  const targetRole = activeStage?.role || task.role || "";
+
+  if (justification && justification.trim()) {
+    const auditRecord: PipelineTransitionAuditRecord = {
+      id: `aud-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`,
+      timestamp: now,
+      fromStageId: "unpipelined",
+      toStageId: activeStage?.id || "stage-0",
+      fromRole: task.role || "unassigned",
+      toRole: targetRole,
+      triggeredBy: "manager",
+      action: "emergency_override",
+      reason: justification.trim(),
+      structuredNotes: {
+        managerOverrideJustification: justification.trim(),
+      },
+    };
+    pipeline.history = [...(pipeline.history ?? []), auditRecord];
+  }
+
+  const updates: Partial<Task> = {
+    pipeline,
+    role: targetRole,
+  };
+
+  return await updateTask(task.id, updates, uid, { allowPipelineOverride: true });
+}
+
+/** Input parameters for emergency manager pipeline overrides. */
+export interface PipelineOverrideOptions {
+  action?:
+    | "force_advance"
+    | "skip_stage"
+    | "insert_stage"
+    | "reset_rejections"
+    | "emergency_override";
+  targetStageId?: string;
+  targetStageIndex?: number;
+  resetRejectionCount?: boolean;
+  skipCurrentStage?: boolean;
+  insertStage?: {
+    id: string;
+    name: string;
+    role: string;
+    description?: string;
+    allowedTransitions?: StageTransitionRule[];
+    requiredFields?: string[];
+    validationRules?: {
+      minCommentLength?: number;
+      requireStructuredHandoff?: boolean;
+      requireRejectedApproachesOnReject?: boolean;
+      customGuards?: string[];
+    };
+    position?: "before_current" | "after_current" | "at_index";
+    index?: number;
+  };
+  justification: string;
+  managerId?: string;
+}
+
+/**
+ * Allows managers to execute emergency pipeline overrides (stage jumps, skipping stages, un-tripping rejection circuit breaker).
+ */
+export async function overrideTaskPipeline(
+  taskId: TaskId,
+  override: PipelineOverrideOptions,
+  userId?: string,
+): Promise<Task> {
+  const uid = resolveUserId(userId);
+  const task = await getTask(taskId, uid);
+  if (!task) {
+    throw new Error(`Task not found: ${taskId}`);
+  }
+  if (!task.pipeline) {
+    throw new Error(`Task ${taskId} is not managed by a pipeline`);
+  }
+  const justification = override.justification?.trim();
+  if (!justification) {
+    throw new Error("Manager override requires a justification");
+  }
+
+  const now = new Date().toISOString();
+  const workingStages = [...task.pipeline.stages];
+  let currentStageIndex = task.pipeline.currentStageIndex ?? 0;
+  const currentStage = workingStages[currentStageIndex];
+
+  // Handle stage insertion if provided
+  if (override.insertStage) {
+    const stageInput = override.insertStage;
+    await ensureRole(stageInput.role, uid);
+    const newStage: TaskPipelineStage = {
+      id: stageInput.id,
+      name: stageInput.name,
+      role: stageInput.role,
+      description: stageInput.description,
+      allowedTransitions: stageInput.allowedTransitions ?? [],
+      requiredFields: stageInput.requiredFields,
+      validationRules: stageInput.validationRules,
+      status: "pending",
+    };
+
+    const position = stageInput.position ?? "after_current";
+    let insertIdx = currentStageIndex + 1;
+    if (position === "before_current") {
+      insertIdx = currentStageIndex;
+    } else if (position === "at_index" && stageInput.index !== undefined) {
+      insertIdx = Math.max(0, Math.min(workingStages.length, stageInput.index));
+    }
+
+    workingStages.splice(insertIdx, 0, newStage);
+    if (position === "before_current") {
+      currentStageIndex += 1;
+    }
+  }
+
+  const action = override.action;
+  let targetStageIndex = currentStageIndex;
+  const shouldSkipCurrent = Boolean(override.skipCurrentStage || action === "skip_stage");
+  const shouldResetRejections = Boolean(
+    override.resetRejectionCount || action === "reset_rejections",
+  );
+
+  if (override.targetStageId) {
+    const foundIdx = workingStages.findIndex((s) => s.id === override.targetStageId);
+    if (foundIdx === -1) {
+      throw new Error(`Override target stage '${override.targetStageId}' not found in pipeline`);
+    }
+    targetStageIndex = foundIdx;
+  } else if (override.targetStageIndex !== undefined) {
+    if (override.targetStageIndex < 0 || override.targetStageIndex >= workingStages.length) {
+      throw new Error(`Override target stage index ${override.targetStageIndex} is out of bounds`);
+    }
+    targetStageIndex = override.targetStageIndex;
+  } else if (action === "force_advance" || action === "skip_stage") {
+    if (currentStageIndex + 1 < workingStages.length) {
+      targetStageIndex = currentStageIndex + 1;
+    }
+  }
+
+  const targetStage = workingStages[targetStageIndex];
+
+  const updatedStages = workingStages.map((st, idx) => {
+    if (idx === currentStageIndex && idx !== targetStageIndex) {
+      return {
+        ...st,
+        status: (shouldSkipCurrent ? "skipped" : "completed") as TaskPipelineStage["status"],
+        completedAt: now,
+      };
+    } else if (idx === targetStageIndex) {
+      return {
+        ...st,
+        status: "active" as const,
+        startedAt: now,
+        completedAt: undefined,
+      };
+    }
+    return st;
+  });
+
+  const auditAction = action === "force_advance"
+    ? "force_advance"
+    : action === "skip_stage" || shouldSkipCurrent
+    ? "skip"
+    : action === "insert_stage" || override.insertStage
+    ? "insert_stage"
+    : "emergency_override";
+
+  const auditRecord: PipelineTransitionAuditRecord = {
+    id: `aud-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`,
+    timestamp: now,
+    fromStageId: currentStage?.id || "unknown",
+    toStageId: targetStage.id,
+    fromRole: currentStage?.role || "",
+    toRole: targetStage.role,
+    triggeredBy: override.managerId || "manager",
+    action: auditAction as PipelineTransitionAuditRecord["action"],
+    reason: justification,
+    structuredNotes: {
+      managerOverrideJustification: justification,
+    },
+  };
+
+  const updatedPipeline: TaskPipeline = {
+    ...task.pipeline,
+    currentStageId: targetStage.id,
+    currentStageIndex: targetStageIndex,
+    rejectionCount: shouldResetRejections ? 0 : task.pipeline.rejectionCount,
+    stages: updatedStages,
+    history: [...(task.pipeline.history ?? []), auditRecord],
+  };
+
+  const updates: Partial<Task> = {
+    role: targetStage.role,
+    pipeline: updatedPipeline,
+  };
+
+  return await updateTask(task.id, updates, uid, { allowPipelineOverride: true });
 }

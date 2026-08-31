@@ -35,6 +35,14 @@ import { claimTaskTool } from "./task_claim.ts";
 import { dependTaskTool } from "./task_depend.ts";
 import { commentTaskTool } from "./task_comment.ts";
 
+// Pipeline & FlowTemplate tools
+import { pipelineTemplateCreateTool } from "./pipeline_template_create.ts";
+import { pipelineTemplateListTool } from "./pipeline_template_list.ts";
+import { pipelineTemplateGetTool } from "./pipeline_template_get.ts";
+import { taskPipelineAttachTool } from "./task_pipeline_attach.ts";
+import { taskPipelineOverrideTool } from "./task_pipeline_override.ts";
+import { taskPipelineStatusTool } from "./task_pipeline_status.ts";
+
 // Memory tools
 import { memorySaveTool } from "./memory_save.ts";
 import { memoryListTool } from "./memory_list.ts";
@@ -84,6 +92,9 @@ export {
   memoryRecallTool,
   memorySaveTool,
   memorySearchTool,
+  pipelineTemplateCreateTool,
+  pipelineTemplateGetTool,
+  pipelineTemplateListTool,
   readyTasksTool,
   roleCreateTool,
   roleListTool,
@@ -91,6 +102,9 @@ export {
   searchWorkflowTool as workflowSearchTool,
   taskCreateBatchTool,
   taskHandoffTool,
+  taskPipelineAttachTool,
+  taskPipelineOverrideTool,
+  taskPipelineStatusTool,
   updateTaskTool,
   validateWorkflowTool,
   visualizeWorkflowTool,
@@ -131,6 +145,13 @@ export const allTools: McpTool[] = [
   claimTaskTool,
   dependTaskTool,
   commentTaskTool,
+  // Pipelines & Flow Templates
+  pipelineTemplateCreateTool,
+  pipelineTemplateListTool,
+  pipelineTemplateGetTool,
+  taskPipelineAttachTool,
+  taskPipelineOverrideTool,
+  taskPipelineStatusTool,
   // Memory
   memorySaveTool,
   memoryListTool,

@@ -13,6 +13,9 @@ const TaskClaimSchema = z.object({
   assignee: z.string().min(1).describe(
     "Identifier of the agent, subagent, or user claiming this task (e.g. 'frontend-agent-1', 'user-matt').",
   ),
+  role: z.string().optional().describe(
+    "Optional role of the claimant to verify against the active pipeline stage role requirement.",
+  ),
 }).refine((data) => data.task || data.taskId, {
   message: "Task ('task' or 'taskId') must be provided.",
 });
@@ -22,7 +25,7 @@ export const claimTaskTool = defineTool({
   description:
     "Atomically claims a task for an assignee using optimistic check-and-set concurrency control. Prevents duplicate work across multiple concurrent agents.",
   schema: TaskClaimSchema,
-  execute: async ({ task, taskId, assignee }) => {
+  execute: async ({ task, taskId, assignee, role }) => {
     const identifier = (taskId ?? task)!.trim();
     const resolved = await resolveTask(identifier);
     if (!resolved) {
@@ -31,7 +34,7 @@ export const claimTaskTool = defineTool({
       );
     }
 
-    const claimed = await claimTask(resolved.id, assignee);
+    const claimed = await claimTask(resolved.id, assignee, undefined, role);
 
     return jsonResponse({
       task: claimed,

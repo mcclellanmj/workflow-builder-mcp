@@ -14,3 +14,4 @@ export * from "./roles.ts";
 export * from "./memories.ts";
 export * from "./handoffs.ts";
 export * from "./hydration.ts";
+export * from "./pipeline_templates.ts";
