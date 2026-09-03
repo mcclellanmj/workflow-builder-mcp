@@ -60,7 +60,7 @@ export function extractSchemaKeys(schema?: z.ZodTypeAny): string[] {
   const keys = new Set<string>();
   const visited = new Set<unknown>();
 
-  function traverse(s: unknown) {
+  function traverse(s: unknown): void {
     if (!s || typeof s !== "object" || visited.has(s)) return;
     visited.add(s);
     // deno-lint-ignore no-explicit-any
@@ -225,11 +225,9 @@ export function formatValidationError(options: {
   lines.push(`Invalid arguments for tool "${toolName}":`);
 
   const validKeys = schema ? extractSchemaKeys(schema) : [];
-  // deno-lint-ignore no-explicit-any
-  const rawObj =
-    rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)
-      ? (rawArgs as Record<string, any>)
-      : null;
+  const rawObj = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs)
+    ? (rawArgs as Record<string, unknown>)
+    : null;
   const scope = typeof rawObj?.scope === "string" ? rawObj.scope : undefined;
 
   // 1. Zod Issues / Failed fields
@@ -279,13 +277,17 @@ export function formatValidationError(options: {
       }
     } else if (lowerScope === "workflow") {
       const hasWf = Boolean(
-        rawObj?.workflowId || rawObj?.workflow || (validKeys.includes("scopeId") && rawObj?.scopeId),
+        rawObj?.workflowId || rawObj?.workflow ||
+          (validKeys.includes("scopeId") && rawObj?.scopeId),
       );
       if (
         !hasWf ||
-        (zodIssues && zodIssues.some((i) => i.path.includes("workflowId") || i.path.includes("workflow")))
+        (zodIssues &&
+          zodIssues.some((i) => i.path.includes("workflowId") || i.path.includes("workflow")))
       ) {
-        lines.push("• Scope hint: When scope is 'workflow', you must provide 'workflowId' (or 'workflow').");
+        lines.push(
+          "• Scope hint: When scope is 'workflow', you must provide 'workflowId' (or 'workflow').",
+        );
       }
     } else if (lowerScope === "node") {
       const hasNode = Boolean(
@@ -295,7 +297,8 @@ export function formatValidationError(options: {
       if (
         !hasNode ||
         !hasWf ||
-        (zodIssues && zodIssues.some((i) => i.path.includes("nodeId") || i.path.includes("workflowId")))
+        (zodIssues &&
+          zodIssues.some((i) => i.path.includes("nodeId") || i.path.includes("workflowId")))
       ) {
         lines.push(
           "• Scope hint: When scope is 'node', you must provide both 'workflowId' (or 'workflow') and 'nodeId' (or 'node').",
@@ -318,7 +321,6 @@ export function formatValidationError(options: {
  * can properly inspect property shapes and register full parameter definitions for tools/list,
  * while preserving top-level optional/default handling for parameter-less executions.
  */
-// deno-lint-ignore no-explicit-any
 export function unwrapZodObject(schema: z.ZodTypeAny): z.ZodTypeAny {
   // deno-lint-ignore no-explicit-any
   let current: any = schema;

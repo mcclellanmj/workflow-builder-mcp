@@ -2,6 +2,8 @@
  * Server-Side Rendered (SSR) Visualization and Share Ticket HTTP Route Handlers.
  */
 
+import { h } from "preact";
+import { renderToString } from "preact-render-to-string";
 import { safeGetEnv } from "../env.ts";
 import { authenticateRequest } from "../auth/oauth.ts";
 import type { AuthResult } from "../auth/oauth.ts";
@@ -14,6 +16,9 @@ import {
 } from "../store/kv.ts";
 import type { ViewTicket } from "../store/types.ts";
 import { hydrateNodesWithExecution } from "../mcp/helpers.ts";
+import { BaseLayout } from "../views/layouts/BaseLayout.tsx";
+import { renderHtmlResponse } from "../views/ssr.ts";
+import { ErrorCard } from "../views/visualize/ErrorCard.tsx";
 import { CORS_HEADERS, errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
 
 export const revokedTickets = new Set<string>([
@@ -24,115 +29,28 @@ export function revokeTicket(ticketId: string): void {
   revokedTickets.add(ticketId.trim());
 }
 
-function renderExpiredTicketHtml(origin: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Link Expired — Workflow Visualizer</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f172a;
-      color: #f8fafc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      margin: 0;
-      padding: 20px;
-    }
-    .card {
-      background: #1e293b;
-      border: 1px solid #475569;
-      border-radius: 12px;
-      padding: 32px;
-      max-width: 480px;
-      text-align: center;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-    }
-    h1 { font-size: 1.5rem; margin-bottom: 12px; color: #f87171; }
-    p { color: #94a3b8; line-height: 1.6; margin-bottom: 20px; font-size: 0.95rem; }
-    .btn {
-      display: inline-block;
-      background: #0284c7;
-      color: white;
-      text-decoration: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      font-weight: 600;
-      font-size: 0.9rem;
-    }
-    .btn:hover { background: #0ea5e9; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>⏳ Share Link Expired</h1>
-    <p>
-      This visualization link has reached its expiration time and is no longer active.
-      To view this workflow, please request a new share link or run the <code>workflow_visualize</code> tool again.
-    </p>
-    <a href="${origin}/" class="btn">Go to Dashboard</a>
-  </div>
-</body>
-</html>`;
+/**
+ * Legacy HTML string generator maintained for backward compatibility.
+ */
+export function renderExpiredTicketHtml(origin: string): string {
+  return renderToString(
+    h(BaseLayout, {
+      title: "Link Expired — Workflow Visualizer",
+      children: h(ErrorCard, { variant: "expired", actionHref: `${origin}/` }),
+    }),
+  );
 }
 
-function renderUnauthorizedHtml(origin: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Unauthorized — Workflow Visualizer</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f172a;
-      color: #f8fafc;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 100vh;
-      margin: 0;
-      padding: 20px;
-    }
-    .card {
-      background: #1e293b;
-      border: 1px solid #475569;
-      border-radius: 12px;
-      padding: 32px;
-      max-width: 480px;
-      text-align: center;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
-    }
-    h1 { font-size: 1.5rem; margin-bottom: 12px; color: #f59e0b; }
-    p { color: #94a3b8; line-height: 1.6; margin-bottom: 20px; font-size: 0.95rem; }
-    .btn {
-      display: inline-block;
-      background: #0284c7;
-      color: white;
-      text-decoration: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      font-weight: 600;
-      font-size: 0.9rem;
-    }
-    .btn:hover { background: #0ea5e9; }
-  </style>
-</head>
-<body>
-  <div class="card">
-    <h1>🔒 Access Restricted</h1>
-    <p>
-      Viewing this workflow requires a valid share ticket, active Passkey login session, or Bearer token.
-    </p>
-    <a href="${origin}/" class="btn">Sign In with Passkey</a>
-  </div>
-</body>
-</html>`;
+/**
+ * Legacy HTML string generator maintained for backward compatibility.
+ */
+export function renderUnauthorizedHtml(origin: string): string {
+  return renderToString(
+    h(BaseLayout, {
+      title: "Unauthorized — Workflow Visualizer",
+      children: h(ErrorCard, { variant: "unauthorized", actionHref: `${origin}/` }),
+    }),
+  );
 }
 
 export async function handleVisualizeRoutes(
@@ -188,10 +106,17 @@ export async function handleVisualizeRoutes(
       if (isApiData) {
         return errorResponse("Ticket has been revoked.", 403);
       }
-      return new Response(renderExpiredTicketHtml(url.origin), {
-        status: 403,
-        headers: { "content-type": "text/html; charset=utf-8", ...CORS_HEADERS },
-      });
+      return renderHtmlResponse(
+        h(ErrorCard, {
+          variant: "expired",
+          actionHref: `${url.origin}/`,
+        }),
+        {
+          status: 403,
+          headers: CORS_HEADERS,
+          title: "Link Expired — Workflow Visualizer",
+        },
+      );
     }
   }
 
@@ -210,10 +135,17 @@ export async function handleVisualizeRoutes(
       if (isApiData) {
         return errorResponse("View ticket is expired or invalid.", 403);
       }
-      return new Response(renderExpiredTicketHtml(url.origin), {
-        status: 403,
-        headers: { "content-type": "text/html; charset=utf-8", ...CORS_HEADERS },
-      });
+      return renderHtmlResponse(
+        h(ErrorCard, {
+          variant: "expired",
+          actionHref: `${url.origin}/`,
+        }),
+        {
+          status: 403,
+          headers: CORS_HEADERS,
+          title: "Link Expired — Workflow Visualizer",
+        },
+      );
     }
 
     resolvedTicket = ticket;
@@ -233,14 +165,20 @@ export async function handleVisualizeRoutes(
           getWwwAuthenticateHeader(url.origin),
         );
       }
-      return new Response(renderUnauthorizedHtml(url.origin), {
-        status: 401,
-        headers: {
-          "content-type": "text/html; charset=utf-8",
-          ...CORS_HEADERS,
-          ...getWwwAuthenticateHeader(url.origin),
+      return renderHtmlResponse(
+        h(ErrorCard, {
+          variant: "unauthorized",
+          actionHref: `${url.origin}/`,
+        }),
+        {
+          status: 401,
+          headers: {
+            ...CORS_HEADERS,
+            ...getWwwAuthenticateHeader(url.origin),
+          },
+          title: "Unauthorized — Workflow Visualizer",
         },
-      });
+      );
     }
     resolvedUserId = effectiveAuth.userId;
   }

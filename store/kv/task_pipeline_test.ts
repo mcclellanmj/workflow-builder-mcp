@@ -1,8 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-} from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { setKv } from "./client.ts";
 import {
   attachPipelineToTask,
@@ -177,7 +173,9 @@ Deno.test("Task Pipeline - Multi-Stage Lifecycle: Advance, Acceptance Notes, and
 
     assertEquals(closedTask.status, "closed");
     assertEquals(closedTask.pipeline?.stages[2].status, "completed");
-    assert(closedTask.acceptanceNotes?.includes("Security audit sign-off complete. No CVEs found."));
+    assert(
+      closedTask.acceptanceNotes?.includes("Security audit sign-off complete. No CVEs found."),
+    );
   } finally {
     await kv.close();
   }

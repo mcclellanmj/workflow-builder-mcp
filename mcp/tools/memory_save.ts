@@ -52,7 +52,9 @@ const MemorySaveSchema = z.object({
 }).refine(
   (data) => {
     if (data.scope === "workflow" || data.scope === "node") {
-      return Boolean(data.workflowId || data.workflow || (data.scope === "workflow" && data.scopeId));
+      return Boolean(
+        data.workflowId || data.workflow || (data.scope === "workflow" && data.scopeId),
+      );
     }
     return true;
   },

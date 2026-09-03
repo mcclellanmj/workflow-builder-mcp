@@ -1,8 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-} from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { setKv } from "./client.ts";
 import {
   createFlowTemplate,
@@ -115,19 +111,37 @@ Deno.test("FlowTemplate - Validation errors", async () => {
     const userId = `tenant_${crypto.randomUUID().slice(0, 8)}`;
 
     await assertRejects(
-      () => createFlowTemplate({ id: "", name: "Test", stages: [] } as any, userId),
+      () =>
+        createFlowTemplate(
+          { id: "", name: "Test", stages: [] } as unknown as Parameters<
+            typeof createFlowTemplate
+          >[0],
+          userId,
+        ),
       Error,
       "Template ID cannot be empty",
     );
 
     await assertRejects(
-      () => createFlowTemplate({ id: "valid-id", name: "", stages: [] } as any, userId),
+      () =>
+        createFlowTemplate(
+          { id: "valid-id", name: "", stages: [] } as unknown as Parameters<
+            typeof createFlowTemplate
+          >[0],
+          userId,
+        ),
       Error,
       "Template name cannot be empty",
     );
 
     await assertRejects(
-      () => createFlowTemplate({ id: "valid-id", name: "Valid", stages: [] } as any, userId),
+      () =>
+        createFlowTemplate(
+          { id: "valid-id", name: "Valid", stages: [] } as unknown as Parameters<
+            typeof createFlowTemplate
+          >[0],
+          userId,
+        ),
       Error,
       "Template must define at least one stage",
     );

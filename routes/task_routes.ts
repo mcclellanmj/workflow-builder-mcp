@@ -20,7 +20,7 @@ import {
 } from "../store/kv.ts";
 import type { TaskPriority, TaskStatus, TaskType } from "../store/types.ts";
 import { CORS_HEADERS, errorResponse, getWwwAuthenticateHeader, jsonResponse } from "./common.ts";
-import { renderTaskKanbanHtml } from "./task_ui.ts";
+import { renderTasksHtml } from "./task_ui.ts";
 
 export async function handleTaskRoutes(
   req: Request,
@@ -45,20 +45,11 @@ export async function handleTaskRoutes(
     const initialTab = path === "/memories"
       ? "memories"
       : (path === "/journals" ? "journals" : "tasks");
-    const html = renderTaskKanbanHtml({
+    return renderTasksHtml({
       origin: url.origin,
       userId: auth.userId,
       userName: auth.user?.name || auth.userId,
       initialTab,
-    });
-
-    return new Response(html, {
-      status: 200,
-      headers: {
-        "content-type": "text/html; charset=utf-8",
-        "cache-control": "no-cache, no-store, must-revalidate",
-        ...CORS_HEADERS,
-      },
     });
   }
 
@@ -156,7 +147,9 @@ export async function handleTaskRoutes(
         return errorResponse("Invalid JSON payload", 400);
       }
 
-      const tasksList = Array.isArray(body) ? body : (Array.isArray(body.tasks) ? body.tasks : null);
+      const tasksList = Array.isArray(body)
+        ? body
+        : (Array.isArray(body.tasks) ? body.tasks : null);
       if (!tasksList || tasksList.length === 0) {
         return errorResponse("Batch tasks array is required", 400);
       }

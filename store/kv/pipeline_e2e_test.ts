@@ -1,18 +1,6 @@
-import {
-  assert,
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-} from "@std/assert";
+import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { setKv } from "./client.ts";
-import {
-  claimTask,
-  closeTask,
-  createTask,
-  getTask,
-  handoffTask,
-  updateTask,
-} from "./tasks.ts";
+import { claimTask, closeTask, createTask, getTask, handoffTask, updateTask } from "./tasks.ts";
 import {
   ERR_PIPELINE_MISSING_MANDATORY_NOTES,
   ERR_PIPELINE_PREMATURE_CLOSE,
@@ -29,6 +17,7 @@ import { taskPipelineOverrideTool } from "../../mcp/tools/task_pipeline_override
 import { taskPipelineAttachTool } from "../../mcp/tools/task_pipeline_attach.ts";
 import type { ToolCallResponse } from "../../mcp/registry.ts";
 
+// deno-lint-ignore no-explicit-any
 const parseToolResponse = (res: ToolCallResponse): Record<string, any> => {
   if (res.isError) {
     const errorText = res.content.map((c) => c.text).join("; ");
@@ -149,7 +138,11 @@ Deno.test("Pipeline E2E - 1. Full Multi-Stage Pathway Progression to Terminal Cl
     assertEquals(closeData.task.status, "closed");
     assertEquals(closeData.task.pipeline.stages[2].status, "completed");
     assertEquals(closeData.task.pipeline.history.length, 2);
-    assert(closeData.task.acceptanceNotes.includes("Security audit passed. Zero vulnerabilities detected."));
+    assert(
+      closeData.task.acceptanceNotes.includes(
+        "Security audit passed. Zero vulnerabilities detected.",
+      ),
+    );
 
     // Verify stored task state via getTask
     const finalTask = await getTask(task.id);

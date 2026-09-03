@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { attachPipelineToTask } from "../../store/kv.ts";
+import type { TaskPipeline } from "../../store/types.ts";
 import { createErrorResponse, defineTool, jsonResponse } from "../helpers.ts";
 import { resolveTask } from "./task_helpers.ts";
 
@@ -37,7 +38,9 @@ export const taskPipelineAttachTool = defineTool({
       );
     }
 
-    const pipelineSource = templateId ? templateId.trim() : (customPipeline as any);
+    const pipelineSource = templateId
+      ? templateId.trim()
+      : (customPipeline as unknown as TaskPipeline);
     const updatedTask = await attachPipelineToTask(
       resolved.id,
       pipelineSource,

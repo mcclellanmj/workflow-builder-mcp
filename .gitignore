@@ -49,3 +49,6 @@ yarn-error.log*
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Antigravity
+.antigravity/

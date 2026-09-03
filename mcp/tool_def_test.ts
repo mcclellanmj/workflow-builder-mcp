@@ -150,7 +150,7 @@ Deno.test("Validation - formatValidationError structured and prescriptive error 
   assert(formatted.includes("Passed 'role_id' -> Did you mean 'roleId'"));
   assert(formatted.includes("• Scope hint:"));
   assert(formatted.includes("When scope is 'role', you must provide 'roleId'"));
-  assert(formatted.includes("• Accepted parameters for \"test_tool\":"));
+  assert(formatted.includes('• Accepted parameters for "test_tool":'));
   assert(formatted.includes("key"));
   assert(formatted.includes("scope"));
   assert(formatted.includes("roleId"));
@@ -184,35 +184,40 @@ Deno.test("Validation - defineTool runtime validation and suggestions", async ()
   assertEquals(data.args.taskId, "tk-100");
 
   // 2. Unknown property / Typo in arguments
-  // deno-lint-ignore no-explicit-any
-  const typoRes = await tool.execute({
-    task_id: "tk-100",
-    title: "Implement feature",
-    desciption: "Typo in description",
-  } as any);
+  const typoRes = await tool.execute(
+    {
+      task_id: "tk-100",
+      title: "Implement feature",
+      desciption: "Typo in description",
+    } as unknown as Parameters<typeof tool.execute>[0],
+  );
   assertEquals(typoRes.isError, true);
   const typoErrorText = typoRes.content[0].text;
   assert(typoErrorText.includes("Unknown parameters:"));
   assert(typoErrorText.includes("Passed 'task_id' -> Did you mean 'taskId'?"));
   assert(typoErrorText.includes("Passed 'desciption' -> Did you mean 'description'?"));
-  assert(typoErrorText.includes("Accepted parameters for \"task_test_tool\": taskId, title, priority, description"));
+  assert(
+    typoErrorText.includes(
+      'Accepted parameters for "task_test_tool": taskId, title, priority, description',
+    ),
+  );
 
   // 3. Missing required field
-  // deno-lint-ignore no-explicit-any
-  const missingFieldRes = await tool.execute({
-    taskId: "tk-100",
-  } as any);
+  const missingFieldRes = await tool.execute(
+    {
+      taskId: "tk-100",
+    } as unknown as Parameters<typeof tool.execute>[0],
+  );
   assertEquals(missingFieldRes.isError, true);
   const missingErrorText = missingFieldRes.content[0].text;
   assert(missingErrorText.includes("Failed fields:"));
   assert(missingErrorText.includes("title: Required"));
 
   // 4. Invalid enum value
-  // deno-lint-ignore no-explicit-any
   const enumRes = await tool.execute({
     taskId: "tk-100",
     title: "Test",
-    priority: "critical" as any,
+    priority: "critical" as unknown as "low" | "medium" | "high",
   });
   assertEquals(enumRes.isError, true);
   assert(enumRes.content[0].text.includes("priority: Invalid enum value"));
@@ -266,16 +271,19 @@ Deno.test("Validation - defineTool scope-dependent validation in memory_save", a
   });
   assertEquals(wfScopeRes.isError, true);
   const wfErrorText = wfScopeRes.content[0].text;
-  assert(wfErrorText.includes("Scope hint: When scope is 'workflow', you must provide 'workflowId'"));
+  assert(
+    wfErrorText.includes("Scope hint: When scope is 'workflow', you must provide 'workflowId'"),
+  );
 
   // 3. Passing scopeId when scope=role (and scopeId is unknown to this tool)
-  // deno-lint-ignore no-explicit-any
-  const unknownScopeIdRes = await tool.execute({
-    key: "auth-rule",
-    content: "Must use PKCE",
-    scope: "role",
-    scopeId: "developer",
-  } as any);
+  const unknownScopeIdRes = await tool.execute(
+    {
+      key: "auth-rule",
+      content: "Must use PKCE",
+      scope: "role",
+      scopeId: "developer",
+    } as unknown as Parameters<typeof tool.execute>[0],
+  );
   assertEquals(unknownScopeIdRes.isError, true);
   const unknownScopeIdError = unknownScopeIdRes.content[0].text;
   assert(unknownScopeIdError.includes("Passed 'scopeId' -> Did you mean 'roleId'"));
