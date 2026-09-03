@@ -238,3 +238,78 @@ Deno.test("Task Create Batch - Error on Unresolved Dependency Reference", async 
     kv.close();
   }
 });
+
+Deno.test("Task Create Batch - Pipeline Pre-Priming (Batch-level and Per-task Override)", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const batchRes = await taskCreateBatchTool.execute({
+      pipelineTemplateId: "unity-dev-playtest-qa",
+      tasks: [
+        {
+          tempId: "task-1",
+          title: "Implement Inventory System",
+          // role not specified -> should resolve from initial stage ("developer")
+        },
+        {
+          tempId: "task-2",
+          title: "Emergency Security Fix",
+          pipelineTemplateId: "hotfix-fast-track", // Per-task override
+        },
+        {
+          tempId: "task-3",
+          title: "Custom Review Task",
+          role: "custom-author", // Explicit role preserved
+          pipelineTemplateId: "code-review-audit",
+        },
+      ],
+      dependencies: [
+        { fromTask: "task-1", toTask: "task-2" },
+      ],
+      format: "json",
+    });
+
+    assert(!batchRes.isError, "Batch creation with pipelines should succeed");
+    const result = parseToolResponse(batchRes);
+
+    assertEquals(result.tasks.length, 3);
+    const [t1, t2, t3] = result.tasks;
+
+    // Task 1: inherits batch-level "unity-dev-playtest-qa" and resolves role "developer"
+    assertEquals(t1.title, "Implement Inventory System");
+    assertEquals(t1.role, "developer");
+    assert(t1.pipeline !== undefined);
+    assertEquals(t1.pipeline?.templateId, "unity-dev-playtest-qa");
+    assertEquals(t1.pipeline?.currentStageId, "dev");
+    assertEquals(t1.pipeline?.stages.length, 3);
+
+    // Task 2: overrides to "hotfix-fast-track" and resolves role "developer" (initial stage of hotfix)
+    assertEquals(t2.title, "Emergency Security Fix");
+    assertEquals(t2.role, "developer");
+    assert(t2.pipeline !== undefined);
+    assertEquals(t2.pipeline?.templateId, "hotfix-fast-track");
+    assertEquals(t2.pipeline?.currentStageId, "fix");
+
+    // Task 3: overrides to "code-review-audit" with explicit role "custom-author" preserved
+    assertEquals(t3.title, "Custom Review Task");
+    assertEquals(t3.role, "custom-author");
+    assert(t3.pipeline !== undefined);
+    assertEquals(t3.pipeline?.templateId, "code-review-audit");
+    assertEquals(t3.pipeline?.currentStageId, "dev");
+
+    // Verify stored state in KV
+    const stored1 = await getTask(t1.id);
+    const stored2 = await getTask(t2.id);
+    const stored3 = await getTask(t3.id);
+
+    assert(stored1?.pipeline !== undefined);
+    assertEquals(stored1?.pipeline?.templateId, "unity-dev-playtest-qa");
+    assert(stored2?.pipeline !== undefined);
+    assertEquals(stored2?.pipeline?.templateId, "hotfix-fast-track");
+    assert(stored3?.pipeline !== undefined);
+    assertEquals(stored3?.pipeline?.templateId, "code-review-audit");
+  } finally {
+    kv.close();
+  }
+});

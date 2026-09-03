@@ -267,14 +267,20 @@ storage. Zero server deployment or network setup required.
 | `workflow_import`              | Import a workflow bundle with ID remapping/cloning, overwrite, and validation.      |
 | `task_ready`                   | Compute the claimable ready frontier of tasks with zero unresolved blockers.        |
 | `task_claim`                   | Atomically claim a ready task to prevent duplicate concurrent work.                 |
-| `task_close`                   | Complete a task and automatically unblock downstream tasks in the DAG.              |
-| `task_create`                  | Create assignable tasks or epics with roles, priorities, and parent-child nesting.  |
-| `task_create_batch`            | Batch create multiple tasks and wire internal dependencies in one atomic call.      |
+| `task_create`                  | Create assignable tasks or epics with roles, priorities, parent-child nesting, and pipelines. |
+| `task_create_batch`            | Batch create multiple tasks and wire internal dependencies in one atomic call with pipeline support. |
 | `task_list`                    | List tasks filtered by workflow, role, assignee, or status.                         |
 | `task_get`                     | Retrieve full task details, blocking dependencies, and child subtasks.              |
 | `task_update`                  | Update task details, status, or append progress notes.                              |
+| `task_close`                   | Complete a task and automatically unblock downstream tasks in the DAG.              |
 | `task_depend`                  | Wire or remove dependency edges (`blocks`, `waits-for`, `conditional-blocks`).      |
 | `task_comment`                 | Append a lightweight log comment (max 256 characters) to a task.                    |
+| `pipeline_template_create`     | Create a reusable multi-stage flow template with role transitions and validation.   |
+| `pipeline_template_list`       | List registered flow templates.                                                     |
+| `pipeline_template_get`        | Retrieve full pipeline template details.                                            |
+| `task_pipeline_attach`         | Attach a pipeline template to an existing task.                                     |
+| `task_pipeline_override`       | Manually override stage transition on a task pipeline.                              |
+| `task_pipeline_status`         | Inspect current pipeline stage and allowed transitions.                             |
 | `role_create`                  | Define a user-defined role with description.                                        |
 | `role_list`                    | List all registered user-defined roles for the current user.                        |
 | `journal_write`                | Save single-entry role shutdown snapshot and next steps.                            |

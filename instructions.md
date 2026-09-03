@@ -17,6 +17,7 @@ structured workflows, Directed Acyclic Graphs (DAGs), review-fix loops, and subw
   - Transforms the workflow template into a root **Epic** (`type: "epic"`).
   - Nested subworkflows hydrate into nested child Epics ("an epic in an epic").
   - Nodes become actionable tasks; edges become directional blocking dependencies.
+  - Nodes can configure `pipelineTemplateId` in their `config` (e.g. `node.config.pipelineTemplateId`), which pre-attaches the multi-stage pipeline and resolves the initial stage role upon hydration.
   - Workflows serve to hydrate tasks and dependencies into an Epic. Stepping through workflow nodes
     is retired in favor of native task management (`task_ready`, `task_claim`, `task_close`).
 
@@ -187,7 +188,7 @@ Memories persist institutional knowledge across runs, agent crashes, and session
 
 ---
 
-## 8. Tool Quick Reference (38 Tools)
+## 8. Tool Quick Reference (44 Tools)
 
 | Category                       | Tool Name                      | Description                                                   | Key Arguments                                                                    |
 | :----------------------------- | :----------------------------- | :------------------------------------------------------------ | :------------------------------------------------------------------------------- |
@@ -211,8 +212,8 @@ Memories persist institutional knowledge across runs, agent crashes, and session
 | **Subworkflows & Portability** | `workflow_extract_subworkflow` | Extract node sequence into a child subworkflow.               | `workflow`, `nodes`, `subworkflowName`                                           |
 | **Subworkflows & Portability** | `workflow_export`              | Export workflow bundle JSON.                                  | `workflow`, `includeSubworkflows?`, `filePath?`                                  |
 | **Subworkflows & Portability** | `workflow_import`              | Import workflow bundle JSON.                                  | `bundleData?`, `filePath?`, `overwrite?`, `clone?`                               |
-| **Tasks**                      | `task_create`                  | Create an assignable work unit or epic.                       | `title`, `type?`, `description?`, `role?`, `workflow?`, `node?`, `parentTaskId?` |
-| **Tasks**                      | `task_create_batch`            | Batch create multiple tasks and wire dependencies.            | `tasks: [{ title, role?, priority?, dependsOnTitles? }]`, `parentTaskId?`        |
+| **Tasks**                      | `task_create`                  | Create an assignable work unit or epic.                       | `title`, `type?`, `description?`, `role?`, `workflow?`, `node?`, `parentTaskId?`, `pipelineTemplateId?` |
+| **Tasks**                      | `task_create_batch`            | Batch create multiple tasks and wire dependencies.            | `tasks: [{ title, tempId?, role?, priority?, type?, parentTaskId?, pipelineTemplateId?, inputs?, metadata? }]`, `dependencies?`, `workflow?`, `executionId?`, `pipelineTemplateId?`, `format?` |
 | **Tasks**                      | `task_list`                    | List tasks with status filter and summary counts.             | `workflow?`, `executionId?`, `status?`, `role?`, `assignee?`, `type?`            |
 | **Tasks**                      | `task_get`                     | Get task details, dependencies, and child subtasks.           | `task`, `includeDependencies?`, `includeChildren?`                               |
 | **Tasks**                      | `task_update`                  | Modify task metadata and append to context notes.             | `task`, `title?`, `description?`, `status?`, `priority?`, `context?`             |
@@ -221,6 +222,12 @@ Memories persist institutional knowledge across runs, agent crashes, and session
 | **Tasks**                      | `task_claim`                   | Atomically lock a task to an assignee.                        | `task`, `assignee`                                                               |
 | **Tasks**                      | `task_depend`                  | Add or remove dependency edges between tasks.                 | `action`, `fromTask`, `toTask`, `type?`                                          |
 | **Tasks**                      | `task_comment`                 | Append a lightweight log comment (max 256 chars).             | `task`, `content`, `author?`                                                     |
+| **Pipelines**                  | `pipeline_template_create`     | Create a reusable multi-stage flow template.                  | `id`, `name`, `stages`, `description?`, `rejectionLoopPolicy?`, `maxRejectionCycles?` |
+| **Pipelines**                  | `pipeline_template_list`       | List all registered flow templates.                           | `format?`                                                                        |
+| **Pipelines**                  | `pipeline_template_get`        | Retrieve pipeline template definition.                        | `templateId`, `format?`                                                          |
+| **Pipelines**                  | `task_pipeline_attach`         | Attach a pipeline template to an existing task.               | `task`, `templateId`, `strictMode?`                                              |
+| **Pipelines**                  | `task_pipeline_override`       | Manually override stage transition on a task pipeline.        | `task`, `targetStageId`, `reason`                                                |
+| **Pipelines**                  | `task_pipeline_status`         | Inspect current pipeline stage and allowed transitions.       | `task`, `format?`                                                                |
 | **Roles**                      | `role_create`                  | Define a user-defined role.                                   | `name`, `description?`                                                           |
 | **Roles**                      | `role_list`                    | List registered user-defined roles.                           | `format?`                                                                        |
 | **Journal**                    | `journal_write`                | Save single-entry role shutdown snapshot.                     | `role`, `entry`, `writtenBy?`                                                    |

@@ -246,6 +246,7 @@ async function planSubworkflow(
         nodeId: node.id,
         role: taskRole,
         priority: taskPriority,
+        pipelineTemplateId: (node.config?.pipelineTemplateId as string) || undefined,
       });
 
       taskIds.push(taskId);
@@ -426,6 +427,7 @@ export async function hydrateWorkflowToEpic(
         nodeId: node.id,
         role: taskRole,
         priority: taskPriority,
+        pipelineTemplateId: (node.config?.pipelineTemplateId as string) || undefined,
       });
 
       taskIds.push(taskId);

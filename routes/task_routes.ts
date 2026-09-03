@@ -9,6 +9,7 @@ import {
   closeTask,
   computeReadyFrontier,
   createTask,
+  createTasks,
   deleteTask,
   getDependencies,
   getTask,
@@ -147,7 +148,58 @@ export async function handleTaskRoutes(
       tasks,
     });
   }
-  // 4. POST /api/tasks - Create task
+  // 4. POST /api/tasks/batch - Create tasks in batch
+  if (path === "/api/tasks/batch" && method === "POST") {
+    try {
+      const body = await req.json();
+      if (!body || typeof body !== "object") {
+        return errorResponse("Invalid JSON payload", 400);
+      }
+
+      const tasksList = Array.isArray(body) ? body : (Array.isArray(body.tasks) ? body.tasks : null);
+      if (!tasksList || tasksList.length === 0) {
+        return errorResponse("Batch tasks array is required", 400);
+      }
+
+      const batchPipelineTemplateId = typeof body.pipelineTemplateId === "string"
+        ? body.pipelineTemplateId
+        : undefined;
+      const batchWorkflowId = typeof body.workflowId === "string" ? body.workflowId : undefined;
+      const batchExecutionId = typeof body.executionId === "string" ? body.executionId : undefined;
+
+      const taskInputs = tasksList.map((t: Record<string, unknown>) => ({
+        id: typeof t.id === "string" ? t.id : undefined,
+        title: String(t.title || "").trim(),
+        description: typeof t.description === "string" ? t.description : undefined,
+        status: t.status as TaskStatus | undefined,
+        priority: t.priority as TaskPriority | undefined,
+        type: t.type as TaskType | undefined,
+        role: typeof t.role === "string" ? t.role : undefined,
+        assignee: typeof t.assignee === "string" ? t.assignee : undefined,
+        parentTaskId: typeof t.parentTaskId === "string" ? t.parentTaskId : undefined,
+        workflowId: typeof t.workflowId === "string" ? t.workflowId : batchWorkflowId,
+        executionId: typeof t.executionId === "string" ? t.executionId : batchExecutionId,
+        nodeId: typeof t.nodeId === "string" ? t.nodeId : undefined,
+        context: typeof t.context === "string" ? t.context : undefined,
+        pipelineTemplateId: typeof t.pipelineTemplateId === "string"
+          ? t.pipelineTemplateId
+          : batchPipelineTemplateId,
+      }));
+
+      for (const t of taskInputs) {
+        if (!t.title) {
+          return errorResponse("Task title is required for all tasks in batch", 400);
+        }
+      }
+
+      const created = await createTasks(taskInputs, userId);
+      return jsonResponse({ count: created.length, tasks: created }, 201);
+    } catch (err) {
+      return errorResponse(err instanceof Error ? err.message : String(err), 400);
+    }
+  }
+
+  // 5. POST /api/tasks - Create task
   if (path === "/api/tasks" && method === "POST") {
     try {
       const body = await req.json();
@@ -172,6 +224,7 @@ export async function handleTaskRoutes(
         executionId: body.executionId,
         nodeId: body.nodeId,
         context: body.context,
+        pipelineTemplateId: body.pipelineTemplateId,
       }, userId);
 
       return jsonResponse({ task: created }, 201);

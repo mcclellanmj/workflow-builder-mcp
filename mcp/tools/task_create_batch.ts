@@ -43,6 +43,9 @@ const TaskBatchItemSchema = z.object({
   metadata: z.record(z.unknown()).optional().describe(
     "Optional key-value metadata for the task.",
   ),
+  pipelineTemplateId: z.string().optional().describe(
+    "Optional FlowTemplate ID to initialize a multi-stage pipeline for this task.",
+  ),
 });
 
 const TaskBatchDependencySchema = z.object({
@@ -80,6 +83,9 @@ const TaskCreateBatchSchema = z.object({
   executionId: z.string().optional().describe(
     "Optional execution ID to link all tasks to an active workflow execution run.",
   ),
+  pipelineTemplateId: z.string().optional().describe(
+    "Optional default FlowTemplate ID to attach to all tasks in this batch unless overridden per task.",
+  ),
   format: z.enum(["json", "markdown", "rich", "both"]).optional().default("json").describe(
     "Optional output format: 'json', 'markdown', 'rich', or 'both'. Defaults to 'json'.",
   ),
@@ -96,6 +102,7 @@ export const taskCreateBatchTool = defineTool({
     workflow,
     workflowId,
     executionId,
+    pipelineTemplateId,
     format,
   }) => {
     let actualWorkflowId = workflowId ?? workflow;
@@ -167,6 +174,7 @@ export const taskCreateBatchTool = defineTool({
         executionId,
         inputs: raw.inputs,
         metadata: raw.metadata,
+        pipelineTemplateId: raw.pipelineTemplateId ?? pipelineTemplateId,
       });
     }
 
