@@ -89,7 +89,7 @@ const TYPE_OPTIONS = [
  *    dependencies/subtasks tree, comments thread with 256-char composer, and status controls.
  */
 export function TaskModal({
-  isOpen = true,
+  isOpen = false,
   mode = "detail",
   task,
   dependencies,
@@ -103,12 +103,9 @@ export function TaskModal({
   onNavigateTask,
   class: classProp,
   className,
-}: TaskModalProps): VNode | null {
-  if (!isOpen) {
-    return null;
-  }
-
+}: TaskModalProps): VNode {
   const customClass = classProp || className || "";
+  const openClass = isOpen ? "open" : "";
 
   // Handle outside backdrop click to close
   const handleBackdropClick = (e: JSX.TargetedMouseEvent<HTMLDivElement>): void => {
@@ -153,7 +150,7 @@ export function TaskModal({
     return (
       <div
         id="createTaskModal"
-        class={`modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto open ${customClass}`
+        class={`modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto ${openClass} ${customClass}`
           .trim()}
         onClick={handleBackdropClick}
         role="dialog"
@@ -356,7 +353,7 @@ export function TaskModal({
   return (
     <div
       id="taskModal"
-      class={`modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto open ${customClass}`
+      class={`modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto ${openClass} ${customClass}`
         .trim()}
       onClick={handleBackdropClick}
       role="dialog"

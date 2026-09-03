@@ -196,28 +196,31 @@ export function TaskApp({
           </div>
 
           {/* Navigation Tabs */}
-          <nav class="flex items-center gap-1 sm:gap-2" aria-label="Task Application Views">
-            <button
+          <nav class="flex items-center gap-1 sm:gap-2" aria-label="Application Navigation">
+            <a
+              href="/tasks"
               class={currentTab === "tasks" ? "nav-tab active" : "nav-tab"}
               id="tab-btn-tasks"
-              {...rawAttr({ onclick: "switchMainTab('tasks')" })}
+              {...rawAttr({ onclick: "switchMainTab('tasks', event)" })}
             >
               📋 Tasks
-            </button>
-            <button
+            </a>
+            <a
+              href="/memories"
               class={currentTab === "memories" ? "nav-tab active" : "nav-tab"}
               id="tab-btn-memories"
-              {...rawAttr({ onclick: "switchMainTab('memories')" })}
+              {...rawAttr({ onclick: "switchMainTab('memories', event)" })}
             >
               🧠 Memory Vault
-            </button>
-            <button
+            </a>
+            <a
+              href="/journals"
               class={currentTab === "journals" ? "nav-tab active" : "nav-tab"}
               id="tab-btn-journals"
-              {...rawAttr({ onclick: "switchMainTab('journals')" })}
+              {...rawAttr({ onclick: "switchMainTab('journals', event)" })}
             >
               📖 Engineering Journals
-            </button>
+            </a>
             <span class="h-4 w-px bg-gray-800 mx-1 hidden md:inline-block" aria-hidden="true" />
             <a
               href="/"
@@ -297,19 +300,17 @@ export function TaskApp({
       {/* Modals */}
       {/* Task Inspection & Detail Modal */}
       <TaskModal
-        isOpen
+        isOpen={isTaskModalOpen}
         mode={taskModalMode}
         task={modalTask}
         currentUser={safeUserName}
-        class={isTaskModalOpen ? "" : "hidden"}
       />
 
       {/* Task Creation Modal */}
       <TaskModal
-        isOpen
+        isOpen={false}
         mode="create"
         currentUser={safeUserName}
-        class="hidden"
       />
 
       {/* Memory Detail & Recall Modal */}

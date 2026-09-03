@@ -83,6 +83,10 @@
    * Switch active top-level tab (tasks, memories, journals).
    */
   function switchMainTab(tab, updateHistory = true) {
+    if (updateHistory && typeof updateHistory === "object" && typeof updateHistory.preventDefault === "function") {
+      updateHistory.preventDefault();
+      updateHistory = true;
+    }
     currentTab = tab;
 
     // Update navigation buttons
@@ -447,8 +451,10 @@
       // Fetch and render context-aware Role Journal & Scoped Memories
       loadTaskContextDetails(currentTask);
 
-      const modalEl = document.getElementById("taskDetailModal");
+      const modalEl = document.getElementById("taskModal") || document.getElementById("taskDetailModal");
       if (modalEl) modalEl.classList.add("open");
+      const innerModal = document.getElementById("taskDetailModal");
+      if (innerModal) innerModal.classList.add("open");
       resetCommentComposer();
     } catch (err) {
       showToast(err.message, true);
@@ -768,8 +774,10 @@
   }
 
   function closeModal() {
-    const modal = document.getElementById("taskDetailModal");
+    const modal = document.getElementById("taskModal") || document.getElementById("taskDetailModal");
     if (modal) modal.classList.remove("open");
+    const inner = document.getElementById("taskDetailModal");
+    if (inner) inner.classList.remove("open");
     currentTask = null;
   }
 
@@ -781,8 +789,10 @@
     document.getElementById("newRole").value = "";
     document.getElementById("newAssignee").value = "";
     document.getElementById("newParentTaskId").value = "";
-    const modal = document.getElementById("newTaskModal");
+    const modal = document.getElementById("createTaskModal") || document.getElementById("newTaskModal");
     if (modal) modal.classList.add("open");
+    const inner = document.getElementById("newTaskModal");
+    if (inner) inner.classList.add("open");
     setTimeout(() => {
       const titleInput = document.getElementById("newTitle");
       if (titleInput) titleInput.focus();
@@ -790,8 +800,10 @@
   }
 
   function closeNewTaskModal() {
-    const modal = document.getElementById("newTaskModal");
+    const modal = document.getElementById("createTaskModal") || document.getElementById("newTaskModal");
     if (modal) modal.classList.remove("open");
+    const inner = document.getElementById("newTaskModal");
+    if (inner) inner.classList.remove("open");
   }
 
   async function submitNewTask() {
@@ -1453,7 +1465,7 @@
       backdrop.addEventListener("click", (e) => {
         if (e.target === backdrop) {
           backdrop.classList.remove("open");
-          if (backdrop.id === "taskDetailModal") currentTask = null;
+          if (backdrop.id === "taskDetailModal" || backdrop.id === "taskModal") currentTask = null;
           if (backdrop.id === "memoryDetailModal") currentMemory = null;
         }
       });

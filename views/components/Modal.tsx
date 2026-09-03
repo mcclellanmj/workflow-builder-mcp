@@ -26,7 +26,7 @@ const SIZE_CLASSES: Record<ModalSize, string> = {
  * Accessible dialog container with backdrop, card container, header, body, and footer.
  */
 export function Modal({
-  isOpen = true,
+  isOpen = false,
   onClose,
   title,
   children,
