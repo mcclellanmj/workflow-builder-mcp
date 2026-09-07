@@ -1382,14 +1382,25 @@ export async function closeTask(
       if (allDone) {
         const parent = await getTask(task.parentTaskId, uid);
         if (parent && parent.status !== "closed" && parent.status !== "wontfix") {
-          const parentCloseResult = await closeTask(
-            parent.id,
-            `All child tasks completed (${children.length} tasks)`,
-            uid,
-          );
-          for (const unblocked of parentCloseResult.unblockedTasks) {
-            if (!unblockedTasks.some((t) => t.id === unblocked.id)) {
-              unblockedTasks.push(unblocked);
+          const isPrematurePipeline = parent.pipeline &&
+            ((parent.pipeline.currentStageIndex ?? 0) < parent.pipeline.stages.length - 1);
+          if (!isPrematurePipeline) {
+            try {
+              const parentCloseResult = await closeTask(
+                parent.id,
+                `All child tasks completed (${children.length} tasks)`,
+                uid,
+              );
+              for (const unblocked of parentCloseResult.unblockedTasks) {
+                if (!unblockedTasks.some((t) => t.id === unblocked.id)) {
+                  unblockedTasks.push(unblocked);
+                }
+              }
+            } catch (err: unknown) {
+              // Ignore if pipeline premature close or other non-fatal parent closure error
+              if (!(err instanceof Error && err.message.includes(ERR_PIPELINE_PREMATURE_CLOSE))) {
+                throw err;
+              }
             }
           }
         }
@@ -1399,14 +1410,24 @@ export async function closeTask(
       if (activeChildren.length === 0) {
         const parent = await getTask(task.parentTaskId, uid);
         if (parent && parent.status !== "closed" && parent.status !== "wontfix") {
-          const parentCloseResult = await closeTask(
-            parent.id,
-            "All child tasks completed",
-            uid,
-          );
-          for (const unblocked of parentCloseResult.unblockedTasks) {
-            if (!unblockedTasks.some((t) => t.id === unblocked.id)) {
-              unblockedTasks.push(unblocked);
+          const isPrematurePipeline = parent.pipeline &&
+            ((parent.pipeline.currentStageIndex ?? 0) < parent.pipeline.stages.length - 1);
+          if (!isPrematurePipeline) {
+            try {
+              const parentCloseResult = await closeTask(
+                parent.id,
+                "All child tasks completed",
+                uid,
+              );
+              for (const unblocked of parentCloseResult.unblockedTasks) {
+                if (!unblockedTasks.some((t) => t.id === unblocked.id)) {
+                  unblockedTasks.push(unblocked);
+                }
+              }
+            } catch (err: unknown) {
+              if (!(err instanceof Error && err.message.includes(ERR_PIPELINE_PREMATURE_CLOSE))) {
+                throw err;
+              }
             }
           }
         }

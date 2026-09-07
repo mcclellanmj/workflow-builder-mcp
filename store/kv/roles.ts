@@ -28,6 +28,12 @@ export async function createRole(
     throw new Error("Role name cannot be empty");
   }
 
+  if (
+    role.description !== undefined && role.description !== null && role.description.length > 500
+  ) {
+    throw new Error("Job description must be 500 characters or less");
+  }
+
   const uid = resolveUserId(userId);
   const kv = await getKv();
 

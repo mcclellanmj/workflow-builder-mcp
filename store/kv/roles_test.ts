@@ -170,6 +170,12 @@ Deno.test("Roles - Validation errors on invalid inputs", async () => {
         Error,
         "Role name cannot be empty",
       );
+
+      await assertRejects(
+        () => createRole({ name: "toolong", description: "x".repeat(501) }),
+        Error,
+        "Job description must be 500 characters or less",
+      );
     });
   } finally {
     kv.close();
@@ -212,6 +218,62 @@ Deno.test("Roles - In-memory caching and cache invalidation", async () => {
       const fetched3 = await getRole("backend-dev");
       assertEquals(fetched3?.id, created.id);
       assertEquals(fetched3?.description, "Lead Backend Engineer");
+    });
+  } finally {
+    clearRoleCache();
+    kv.close();
+  }
+});
+
+Deno.test("Roles - Edge cases: boundary 500 chars, empty, unicode, markdown, and special characters", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+  clearRoleCache();
+
+  try {
+    await withUserContext("user_edge_test", async () => {
+      // 1. Boundary: Exactly 500 characters succeeds
+      const exact500 = "a".repeat(500);
+      const role500 = await createRole({ name: "role-500", description: exact500 });
+      assertEquals(role500.description?.length, 500);
+      const fetched500 = await getRole("role-500");
+      assertEquals(fetched500?.description, exact500);
+
+      // 2. Boundary: Exactly 501 characters rejected
+      const exact501 = "a".repeat(501);
+      await assertRejects(
+        () => createRole({ name: "role-501", description: exact501 }),
+        Error,
+        "Job description must be 500 characters or less",
+      );
+
+      // 3. Empty string description succeeds
+      const emptyDescRole = await createRole({ name: "empty-desc", description: "" });
+      assertEquals(emptyDescRole.description, "");
+      const fetchedEmpty = await getRole("empty-desc");
+      assertEquals(fetchedEmpty?.description, "");
+
+      // 4. Undefined description succeeds
+      const undefinedDescRole = await createRole({ name: "undef-desc" });
+      assertEquals(undefinedDescRole.description, undefined);
+      const fetchedUndef = await getRole("undef-desc");
+      assertEquals(fetchedUndef?.description, undefined);
+
+      // 5. Special characters, markdown, quotes, HTML entities
+      const markdownDesc =
+        '### Lead Role\n- Duties: `verify()`, **test**, & "audit"\n<script>alert(1)</script>';
+      const mdRole = await createRole({ name: "markdown-role", description: markdownDesc });
+      assertEquals(mdRole.description, markdownDesc);
+      const fetchedMd = await getRole("markdown-role");
+      assertEquals(fetchedMd?.description, markdownDesc);
+
+      // 6. Unicode, international text, and emojis
+      const unicodeDesc =
+        "🚀 Lead Architect / 開発リーダー: データベース設計・信頼性保証 🎯 [100% Pass]";
+      const unicodeRole = await createRole({ name: "unicode-role", description: unicodeDesc });
+      assertEquals(unicodeRole.description, unicodeDesc);
+      const fetchedUnicode = await getRole("unicode-role");
+      assertEquals(fetchedUnicode?.description, unicodeDesc);
     });
   } finally {
     clearRoleCache();

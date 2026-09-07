@@ -1002,7 +1002,7 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
     assert(tasksHtml.includes("Workflow MCP"));
     assert(tasksHtml.includes('id="tasksView"'));
     assert(tasksHtml.includes('id="memoriesView"'));
-    assert(tasksHtml.includes('id="journalsView"'));
+    assert(tasksHtml.includes('id="rolesView"'));
     assert(tasksHtml.includes('id="tab-btn-tasks"'));
     assert(tasksHtml.includes('class="nav-tab active" id="tab-btn-tasks"'));
     assert(tasksHtml.includes("switchMainTab"));
@@ -1019,16 +1019,29 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
     assert(memHtml.includes('id="memStatTotal"'));
     assert(memHtml.includes('id="memoryDetailModal"'));
 
-    // 4. Authenticated GET /journals UI
+    // 4. Authenticated GET /journals UI (Backward compatibility alias)
     const journalRes = await handleHttpRequest(
       new Request("http://localhost:8000/journals", { method: "GET", headers: authHeaders }),
     );
     assertEquals(journalRes.status, 200);
     assertEquals(journalRes.headers.get("content-type"), "text/html; charset=utf-8");
     const journalHtml = await journalRes.text();
-    assert(journalHtml.includes('class="nav-tab active" id="tab-btn-journals"'));
+    assert(journalHtml.includes('class="nav-tab active" id="tab-btn-roles"'));
+    assert(journalHtml.includes('id="rolesView"'));
     assert(journalHtml.includes('id="rolesGrid"'));
-    assert(journalHtml.includes('id="editJournalModal"'));
+    assert(journalHtml.includes('id="roleDetailModal"'));
+
+    // 4b. Authenticated GET /roles UI
+    const rolesRes = await handleHttpRequest(
+      new Request("http://localhost:8000/roles", { method: "GET", headers: authHeaders }),
+    );
+    assertEquals(rolesRes.status, 200);
+    assertEquals(rolesRes.headers.get("content-type"), "text/html; charset=utf-8");
+    const rolesHtml = await rolesRes.text();
+    assert(rolesHtml.includes('class="nav-tab active" id="tab-btn-roles"'));
+    assert(rolesHtml.includes('id="rolesView"'));
+    assert(rolesHtml.includes('id="rolesGrid"'));
+    assert(rolesHtml.includes('id="roleDetailModal"'));
 
     // 5. GET / Dashboard Navigation & Endpoints List (Public)
     const dashRes = await handleHttpRequest(
@@ -1038,9 +1051,9 @@ Deno.test("HTTP Server - Web UI Routes: /tasks, /memories, /journals and Dashboa
     const dashHtml = await dashRes.text();
     assert(dashHtml.includes('href="/tasks"'));
     assert(dashHtml.includes('href="/memories"'));
-    assert(dashHtml.includes('href="/journals"'));
+    assert(dashHtml.includes('href="/roles"'));
     assert(dashHtml.includes("Memory Vault & Explorer UI"));
-    assert(dashHtml.includes("Role Journals Web UI"));
+    assert(dashHtml.includes("Roles Catalog & Journals"));
   } finally {
     kv.close();
   }

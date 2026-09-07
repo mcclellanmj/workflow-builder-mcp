@@ -284,12 +284,12 @@ Deno.test("TaskApp - renders header, nav tabs, views, script tags, and global ru
   // Navigation Tabs
   assertStringIncludes(text, 'id="tab-btn-tasks"');
   assertStringIncludes(text, 'id="tab-btn-memories"');
-  assertStringIncludes(text, 'id="tab-btn-journals"');
+  assertStringIncludes(text, 'id="tab-btn-roles"');
 
   // Three Main View Containers
   assertStringIncludes(text, 'id="tasksView"');
   assertStringIncludes(text, 'id="memoriesView"');
-  assertStringIncludes(text, 'id="journalsView"');
+  assertStringIncludes(text, 'id="rolesView"');
 
   // Active view content
   assertStringIncludes(text, "tk-app-1");
@@ -307,11 +307,11 @@ Deno.test("TaskApp - renders header, nav tabs, views, script tags, and global ru
   assertStringIncludes(text, 'id="memoryDetailModal"');
   assertStringIncludes(text, 'id="newMemoryModal"');
   assertStringIncludes(text, 'id="newRoleModal"');
-  assertStringIncludes(text, 'id="editJournalModal"');
+  assertStringIncludes(text, 'id="roleDetailModal"');
   assertStringIncludes(text, 'id="toast"');
 });
 
-Deno.test("TaskApp - renders with initialTab=memories and initialTab=journals", async () => {
+Deno.test("TaskApp - renders with initialTab=memories and initialTab=roles", async () => {
   // Memories tab active
   const memVnode = h(TaskApp, {
     origin: "http://localhost:8000",
@@ -322,13 +322,13 @@ Deno.test("TaskApp - renders with initialTab=memories and initialTab=journals", 
   assertStringIncludes(memText, "New Memory");
   assertStringIncludes(memText, 'globalThis.currentTab = "memories"');
 
-  // Journals tab active
-  const jVnode = h(TaskApp, {
+  // Roles tab active
+  const rVnode = h(TaskApp, {
     origin: "http://localhost:8000",
-    initialTab: "journals",
+    initialTab: "roles",
   });
-  const jRes = renderHtmlResponse(jVnode);
-  const jText = await jRes.text();
-  assertStringIncludes(jText, "New Role");
-  assertStringIncludes(jText, 'globalThis.currentTab = "journals"');
+  const rRes = renderHtmlResponse(rVnode);
+  const rText = await rRes.text();
+  assertStringIncludes(rText, "New Role");
+  assertStringIncludes(rText, 'globalThis.currentTab = "roles"');
 });

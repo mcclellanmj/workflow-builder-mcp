@@ -96,10 +96,10 @@ export function DashboardApp({
               🧠 Memories
             </a>
             <a
-              href="/journals"
+              href="/roles"
               class="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"
             >
-              📖 Journals
+              👥 Roles
             </a>
           </nav>
 
@@ -245,18 +245,18 @@ export function DashboardApp({
             </a>
 
             <a
-              href="/journals"
+              href="/roles"
               class="flex flex-col gap-1 p-3.5 bg-gray-900/60 hover:bg-gray-900 border border-gray-700/70 hover:border-blue-500 rounded-lg transition-colors group"
             >
               <div class="flex items-center justify-between">
                 <span
                   class="text-sm font-semibold text-gray-200 group-hover:text-blue-400"
-                  dangerouslySetInnerHTML={{ __html: "📖 Role Journals Web UI" }}
+                  dangerouslySetInnerHTML={{ __html: "👥 Roles Catalog & Journals" }}
                 />
-                <span class="text-xs text-gray-500">GET /journals</span>
+                <span class="text-xs text-gray-500">GET /roles</span>
               </div>
               <p class="text-xs text-gray-400">
-                Persistent engineering logs and handoff records per agent role.
+                Persistent engineering roles, job descriptions, handoffs, and logs.
               </p>
             </a>
 

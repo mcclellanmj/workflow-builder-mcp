@@ -555,6 +555,47 @@ Deno.test("Role & Journal REST Endpoints - Full Lifecycle (Roles, Enriched Journ
     assertEquals(emptyRoleRes.status, 400);
     assert((await emptyRoleRes.json()).error.includes("Role name is required"));
 
+    // 3b. POST /api/roles description length validation (> 500 characters)
+    const longDescRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          name: "too-long-role",
+          description: "a".repeat(501),
+        }),
+      }),
+    );
+    assertEquals(longDescRes.status, 400);
+    assert((await longDescRes.json()).error.includes("500 characters"));
+
+    // 3c. PATCH /api/roles/:role description update
+    const patchRoleRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles/qa-engineer", {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          description: "Updated QA description within limit",
+        }),
+      }),
+    );
+    assertEquals(patchRoleRes.status, 200);
+    const patchData = await patchRoleRes.json();
+    assertEquals(patchData.role.description, "Updated QA description within limit");
+
+    // 3d. PATCH /api/roles/:role description too long
+    const patchLongDescRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles/qa-engineer", {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          description: "x".repeat(501),
+        }),
+      }),
+    );
+    assertEquals(patchLongDescRes.status, 400);
+    assert((await patchLongDescRes.json()).error.includes("500 characters"));
+
     // 4. GET /api/journals/qa-engineer before writing journal -> journal: null
     const noJournalRes = await handleHttpRequest(
       new Request("http://localhost:8000/api/journals/qa-engineer", {
@@ -848,18 +889,31 @@ Deno.test("Web UI Routes & Auth Guard - Redirects and HTML Rendering (/memories,
     assert(memHtml.includes('id="memStatWorkflow"'));
     assert(memHtml.includes('id="memStatRole"'));
 
-    // GET /journals - Role Journals UI
+    // GET /journals - Role Journals UI (Backward compatibility alias)
     const journalUiRes = await handleHttpRequest(
       new Request("http://localhost:8000/journals", { method: "GET", headers: authHeaders }),
     );
     assertEquals(journalUiRes.status, 200);
     assertEquals(journalUiRes.headers.get("content-type"), "text/html; charset=utf-8");
     const journalHtml = await journalUiRes.text();
-    assert(journalHtml.includes('class="nav-tab active" id="tab-btn-journals"'));
+    assert(journalHtml.includes('class="nav-tab active" id="tab-btn-roles"'));
+    assert(journalHtml.includes('id="rolesView"'));
     assert(journalHtml.includes('id="rolesGrid"'));
-    assert(journalHtml.includes('id="editJournalModal"'));
     assert(journalHtml.includes('id="newRoleModal"'));
-    assert(journalHtml.includes("Role Journals"));
+    assert(journalHtml.includes('id="roleDetailModal"'));
+
+    // GET /roles - Unified Roles UI
+    const rolesUiRes = await handleHttpRequest(
+      new Request("http://localhost:8000/roles", { method: "GET", headers: authHeaders }),
+    );
+    assertEquals(rolesUiRes.status, 200);
+    assertEquals(rolesUiRes.headers.get("content-type"), "text/html; charset=utf-8");
+    const rolesHtml = await rolesUiRes.text();
+    assert(rolesHtml.includes('class="nav-tab active" id="tab-btn-roles"'));
+    assert(rolesHtml.includes('id="rolesView"'));
+    assert(rolesHtml.includes('id="rolesGrid"'));
+    assert(rolesHtml.includes('id="newRoleModal"'));
+    assert(rolesHtml.includes('id="roleDetailModal"'));
 
     // GET /tasks - Task Kanban Board UI
     const tasksUiRes = await handleHttpRequest(
@@ -882,6 +936,122 @@ Deno.test("Web UI Routes & Auth Guard - Redirects and HTML Rendering (/memories,
     assert(tasksHtml.includes('id="taskMemoriesContainer"'));
     assert(tasksHtml.includes('id="detailContext"'));
     assert(tasksHtml.includes("Relevant Memories:"));
+  } finally {
+    kv.close();
+  }
+});
+
+Deno.test("Role REST Endpoints - Boundary, Unicode, and Markdown", async () => {
+  const kv = await Deno.openKv(":memory:");
+  setKv(kv);
+
+  try {
+    const userId = "user_role_boundary_test";
+    const tokenInfo = await createApiToken(userId, "Role Boundary Token");
+    const authHeaders = {
+      "Authorization": `Bearer ${tokenInfo.token}`,
+      "Content-Type": "application/json",
+    };
+
+    // 1. POST /api/roles description boundary: exactly 500 characters succeeds (201)
+    const exact500Res = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          name: "boundary-500-role",
+          description: "b".repeat(500),
+        }),
+      }),
+    );
+    assertEquals(exact500Res.status, 201);
+    const data500 = await exact500Res.json();
+    assertEquals(data500.role.description.length, 500);
+
+    // 2. POST /api/roles description boundary: 501 characters rejected (400)
+    const over500Res = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          name: "boundary-501-role",
+          description: "b".repeat(501),
+        }),
+      }),
+    );
+    assertEquals(over500Res.status, 400);
+    const over500Data = await over500Res.json();
+    assert(over500Data.error.includes("500 characters"));
+
+    // 3. POST /api/roles with empty string description succeeds (201)
+    const emptyDescRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          name: "empty-desc-role",
+          description: "",
+        }),
+      }),
+    );
+    assertEquals(emptyDescRes.status, 201);
+    assertEquals((await emptyDescRes.json()).role.description, "");
+
+    // 4. POST /api/roles with undefined description succeeds (201)
+    const undefDescRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          name: "undef-desc-role",
+        }),
+      }),
+    );
+    assertEquals(undefDescRes.status, 201);
+    assertEquals((await undefDescRes.json()).role.description, undefined);
+
+    // 5. POST /api/roles with markdown, special chars, and Unicode
+    const unicodeRoleRes = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          name: "unicode-role",
+          description: "🚀 Lead QA / テスト担当: `run_all()` & **coverage** <tags>",
+        }),
+      }),
+    );
+    assertEquals(unicodeRoleRes.status, 201);
+    assertEquals(
+      (await unicodeRoleRes.json()).role.description,
+      "🚀 Lead QA / テスト担当: `run_all()` & **coverage** <tags>",
+    );
+
+    // 6. PATCH /api/roles/:role with exactly 500 characters succeeds (200)
+    const patchExact500Res = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles/boundary-500-role", {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          description: "c".repeat(500),
+        }),
+      }),
+    );
+    assertEquals(patchExact500Res.status, 200);
+    assertEquals((await patchExact500Res.json()).role.description.length, 500);
+
+    // 7. PATCH /api/roles/:role with 501 characters rejected (400)
+    const patchOver500Res = await handleHttpRequest(
+      new Request("http://localhost:8000/api/roles/boundary-500-role", {
+        method: "PATCH",
+        headers: authHeaders,
+        body: JSON.stringify({
+          description: "c".repeat(501),
+        }),
+      }),
+    );
+    assertEquals(patchOver500Res.status, 400);
+    assert((await patchOver500Res.json()).error.includes("500 characters"));
   } finally {
     kv.close();
   }

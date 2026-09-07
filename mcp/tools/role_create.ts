@@ -6,9 +6,10 @@ const RoleCreateSchema = z.object({
   name: z.string().min(1).describe(
     "The name of the role (e.g. 'frontend', 'security-reviewer', 'qa', 'human').",
   ),
-  description: z.string().optional().describe(
-    "Optional description of what this role is responsible for.",
-  ),
+  description: z.string().max(500, "Job description must be 500 characters or less").optional()
+    .describe(
+      "Optional job description (<500 characters) of what this role is responsible for.",
+    ),
 });
 
 export const roleCreateTool = defineTool({

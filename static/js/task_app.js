@@ -80,7 +80,7 @@
      ========================================================================= */
 
   /**
-   * Switch active top-level tab (tasks, memories, journals).
+   * Switch active top-level tab (tasks, memories, roles, journals).
    */
   function switchMainTab(tab, updateHistory = true) {
     if (
@@ -90,12 +90,15 @@
       updateHistory.preventDefault();
       updateHistory = true;
     }
-    const safeTab = (tab === "memories" || tab === "journals") ? tab : "tasks";
+    let safeTab = tab;
+    if (safeTab === "journals") safeTab = "roles";
+    if (safeTab !== "memories" && safeTab !== "roles") safeTab = "tasks";
     currentTab = safeTab;
 
     // Update navigation buttons
     document.querySelectorAll(".nav-tab").forEach((btn) => btn.classList.remove("active"));
-    const activeBtn = document.getElementById("tab-btn-" + safeTab);
+    const activeBtn = document.getElementById("tab-btn-" + safeTab) ||
+      (safeTab === "roles" ? document.getElementById("tab-btn-journals") : null);
     if (activeBtn) activeBtn.classList.add("active");
 
     // Update header action button label
@@ -103,11 +106,11 @@
     if (actionText) {
       if (safeTab === "tasks") actionText.textContent = "New Task";
       else if (safeTab === "memories") actionText.textContent = "New Memory";
-      else if (safeTab === "journals") actionText.textContent = "New Role";
+      else if (safeTab === "roles" || safeTab === "journals") actionText.textContent = "New Role";
     }
 
     // Toggle view containers cleanly
-    const tabViews = ["tasksView", "memoriesView", "journalsView"];
+    const tabViews = ["tasksView", "memoriesView", "rolesView", "journalsView"];
     tabViews.forEach((id) => {
       const el = document.getElementById(id);
       if (el) el.classList.add("hidden");
@@ -119,7 +122,8 @@
       }
     });
 
-    const activeView = document.getElementById(safeTab + "View");
+    const activeView = document.getElementById(safeTab + "View") ||
+      (safeTab === "roles" ? document.getElementById("journalsView") : null);
     if (activeView) {
       activeView.classList.remove("hidden");
       // Safety: ensure any nested containers inside active view don't get stuck hidden
@@ -137,7 +141,7 @@
     // Load corresponding dataset
     if (safeTab === "tasks") loadTasks();
     else if (safeTab === "memories") loadMemories();
-    else if (safeTab === "journals") loadJournals();
+    else if (safeTab === "roles" || safeTab === "journals") loadRoles();
   }
 
   /**
@@ -146,7 +150,7 @@
   function handleHeaderAction() {
     if (currentTab === "tasks") openNewTaskModal();
     else if (currentTab === "memories") openNewMemoryModal();
-    else if (currentTab === "journals") openNewRoleModal();
+    else if (currentTab === "roles" || currentTab === "journals") openNewRoleModal();
   }
 
   /* =========================================================================
@@ -1608,57 +1612,78 @@
   }
 
   /* =========================================================================
-     3. ROLE JOURNALS IMPLEMENTATION
+     3. ROLES CATALOG & ROLE JOURNALS IMPLEMENTATION
      ========================================================================= */
 
+  let currentDetailRoleName = null;
+
   /**
-   * Fetch all roles with active journal entries.
+   * Fetch all roles with their metadata and active journal entries.
    */
-  async function loadJournals(showNotification = false) {
+  async function loadRoles(showNotification = false) {
     const grid = document.getElementById("rolesGrid");
     if (grid && allRoles.length === 0) {
       grid.innerHTML = `
         <div class="flex flex-col items-center justify-center p-12 text-center text-gray-400 gap-3">
-          <div class="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-          <p class="text-sm font-medium">Loading Role Journal entries...</p>
+          <div class="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <p class="text-sm font-medium">Loading engineering roles...</p>
         </div>
       `;
     }
     try {
+      // Ensure tasks are available in background for role task counts
+      if (allTasks.length === 0) {
+        fetch("/api/tasks")
+          .then((r) => (r.ok ? r.json() : { tasks: [] }))
+          .then((d) => {
+            allTasks = d.tasks || [];
+            renderRolesGrid();
+          })
+          .catch(() => {});
+      }
+
       const res = await fetch("/api/roles");
       if (!res.ok) throw new Error("Failed to load roles");
       const data = await res.json();
       allRoles = data.roles || [];
 
-      updateJournalMetrics();
-      renderJournalsGrid();
-      if (showNotification) showToast("Role Journals refreshed");
+      updateRoleMetrics();
+      renderRolesGrid();
+      if (showNotification) showToast("Roles refreshed");
     } catch (err) {
       showToast(err.message, true);
       if (grid && allRoles.length === 0) {
         grid.innerHTML = `
           <div class="flex flex-col items-center justify-center p-12 text-center text-rose-400 gap-3 bg-gray-900/40 rounded-xl border border-rose-900/30">
             <span class="text-3xl">⚠️</span>
-            <p class="text-sm font-medium">Failed to load role journals: ${
-          escapeHtml(err.message)
-        }</p>
-            <button type="button" class="btn btn-sm btn-secondary px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs mt-2" onclick="loadJournals(true)">Retry</button>
+            <p class="text-sm font-medium">Failed to load roles: ${escapeHtml(err.message)}</p>
+            <button type="button" class="btn btn-sm btn-secondary px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs mt-2" onclick="loadRoles(true)">Retry</button>
           </div>
         `;
       }
     }
   }
 
-  function updateJournalMetrics() {
-    const statRoles = document.getElementById("journalStatRoles");
-    const statEntries = document.getElementById("journalStatEntries");
+  function loadJournals(showNotification = false) {
+    return loadRoles(showNotification);
+  }
+
+  function updateRoleMetrics() {
+    const statRoles = document.getElementById("journalStatRoles") ||
+      document.getElementById("roleStatRoles");
+    const statEntries = document.getElementById("journalStatEntries") ||
+      document.getElementById("roleStatJournals");
 
     if (statRoles) statRoles.textContent = allRoles.length;
     const activeJournals = allRoles.filter((r) => r.journal && r.journal.entry).length;
     if (statEntries) statEntries.textContent = activeJournals;
   }
 
-  function renderJournalsGrid() {
+  function updateJournalMetrics() {
+    return updateRoleMetrics();
+  }
+
+  function renderRolesGrid() {
     const grid = document.getElementById("rolesGrid");
     if (!grid) return;
     const searchEl = document.getElementById("journal-search-input") ||
@@ -1666,41 +1691,29 @@
     const search = (searchEl ? searchEl.value : "").toLowerCase().trim();
 
     const filtered = allRoles.filter((r) => {
-      if (activeJournalRoleTab && activeJournalRoleTab !== "all" && activeJournalRoleTab !== "") {
-        if ((r.name || "").toLowerCase() !== activeJournalRoleTab.toLowerCase()) {
-          return false;
-        }
-      }
-
       if (!search) return true;
       const matchName = (r.name || "").toLowerCase().includes(search);
       const matchDesc = (r.description || "").toLowerCase().includes(search);
       const matchJournal = r.journal && (r.journal.entry || "").toLowerCase().includes(search);
       const matchAuthor = r.journal && (r.journal.writtenBy || "").toLowerCase().includes(search);
-      const matchTags = r.journal && r.journal.tags && Array.isArray(r.journal.tags) &&
-        r.journal.tags.some((t) => t.toLowerCase().includes(search));
-      return matchName || matchDesc || matchJournal || matchAuthor || matchTags;
+      return matchName || matchDesc || matchJournal || matchAuthor;
     });
 
     if (filtered.length === 0) {
-      const isFiltered = Boolean(
-        (document.getElementById("journal-search-input") ||
-          document.getElementById("journalSearchInput"))?.value ||
-          (activeJournalRoleTab && activeJournalRoleTab !== "all"),
-      );
+      const isFiltered = Boolean(search);
       grid.innerHTML = `
         <div class="flex flex-col items-center justify-center p-12 text-center text-gray-400 gap-3 bg-gray-900/40 rounded-xl border border-gray-800">
-          <span class="text-3xl">${isFiltered ? "🔍" : "📖"}</span>
+          <span class="text-3xl">${isFiltered ? "🔍" : "👥"}</span>
           <h3 class="text-base font-semibold text-gray-200">${
-        isFiltered ? "No matching journal entries" : "No role journals found"
+        isFiltered ? "No matching roles found" : "No engineering roles defined"
       }</h3>
           <p class="text-sm text-gray-400 max-w-md">${
         isFiltered
-          ? "No journal entries match your selected role or search query. Try clearing filters or selecting another role tab."
-          : "No engineering roles or journal entries have been recorded yet. Click '+ New Role' to create one."
+          ? "No roles match your search keyword. Try clearing your search filter."
+          : "No engineering roles have been registered yet. Click '+ New Role' to define one."
       }</p>
           <div class="flex items-center gap-2 mt-2">
-            <button type="button" class="btn btn-sm btn-secondary px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200" onclick="openNewRoleModal()">
+            <button type="button" class="btn btn-sm btn-primary px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-500 text-white cursor-pointer" onclick="openNewRoleModal()">
               <span>➕</span>
               <span>New Role</span>
             </button>
@@ -1714,153 +1727,109 @@
       const hasJournal = Boolean(r.journal && r.journal.entry);
       const colors = getRoleColor(r.name);
       const initial = (r.name || "R").trim().charAt(0).toUpperCase() || "R";
-      const isoTime = hasJournal
-        ? (r.journal.updatedAt || r.journal.createdAt || r.journal.timestamp)
-        : null;
-      const formattedTime = isoTime ? formatTimestamp(isoTime) : null;
+      const roleTasks = allTasks.filter(
+        (t) => (t.role || "").toLowerCase() === (r.name || "").toLowerCase(),
+      );
       const journalEntryText = hasJournal ? r.journal.entry : "";
-
-      const tagsHtml =
-        (hasJournal && r.journal.tags && Array.isArray(r.journal.tags) && r.journal.tags.length > 0)
-          ? `<div class="flex flex-wrap items-center gap-1.5 pt-1">
-            <span class="text-[10px] uppercase font-semibold text-gray-500 tracking-wider">Tags:</span>
-            ${
-            r.journal.tags.map((tag) => `
-              <span class="text-[11px] font-mono text-gray-400 bg-gray-800/70 border border-gray-700/60 px-2 py-0.5 rounded-full hover:text-gray-200 transition-colors">
-                #${escapeHtml(tag)}
-              </span>
-            `).join("")
-          }
-          </div>`
-          : "";
 
       return `
         <div
-          class="group relative flex flex-col gap-3 p-5 rounded-xl bg-gray-900/90 border border-gray-800 hover:border-gray-700 transition-all duration-150 shadow-sm hover:shadow-md"
+          class="group relative flex flex-col justify-between gap-3 p-5 rounded-xl bg-gray-900/90 border border-gray-800 hover:border-gray-700 transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer"
           data-role="${escapeHtml(r.name)}"
+          onclick="openRoleDetailModal('${escapeHtml(r.name)}')"
         >
-          <!-- Header: Role Avatar, Role Badge, Author, & Formatted Timestamp -->
-          <div class="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
-            <div class="flex items-center gap-3">
-              <!-- Role Avatar -->
-              <div
-                class="w-9 h-9 rounded-lg flex items-center justify-center font-mono font-bold text-sm border ${colors.bg} ${colors.text} ${colors.border} shadow-sm shrink-0"
-                title="Role: ${escapeHtml(r.name)}"
-              >
-                ${escapeHtml(initial)}
-              </div>
-
-              <div class="flex flex-col gap-0.5">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span
-                    class="inline-flex items-center gap-1 font-medium tracking-wide uppercase select-none bg-indigo-950/70 text-indigo-300 border border-indigo-800/70 font-mono px-2 py-0.5 text-xs rounded-full cursor-pointer hover:bg-indigo-900/80 transition-colors"
-                    onclick="filterJournalsByRole('${escapeHtml(r.name)}')"
-                    title="Filter journals by @${escapeHtml(r.name)}"
-                  >
+          <!-- Top: Avatar, Role Title, Badges -->
+          <div class="flex flex-col gap-2.5">
+            <div class="flex items-start justify-between gap-3">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <div
+                  class="w-10 h-10 rounded-lg flex items-center justify-center font-mono font-bold text-base border ${colors.bg} ${colors.text} ${colors.border} shadow-sm shrink-0"
+                >
+                  ${escapeHtml(initial)}
+                </div>
+                <div class="flex flex-col min-w-0">
+                  <span class="font-mono font-bold text-sm text-gray-100 truncate group-hover:text-blue-400 transition-colors">
                     @${escapeHtml(r.name)}
                   </span>
-                  ${
-        hasJournal && r.journal.writtenBy
-          ? `
-                    <span class="text-xs text-gray-400 flex items-center gap-1">
-                      <span>by</span>
-                      <span class="text-gray-200 font-medium font-mono">${
-            escapeHtml(r.journal.writtenBy)
-          }</span>
-                    </span>
-                  `
-          : ""
+                  <span class="text-[11px] text-gray-500 font-mono">
+                    ${
+        r.createdAt ? `Created ${new Date(r.createdAt).toLocaleDateString()}` : "Active Role"
       }
+                  </span>
                 </div>
+              </div>
 
+              <!-- Badges -->
+              <div class="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                <span class="inline-flex items-center gap-1 text-[10px] font-medium bg-blue-950/70 text-blue-300 border border-blue-800/70 px-2 py-0.5 rounded-full">
+                  📋 ${roleTasks.length} ${roleTasks.length === 1 ? "task" : "tasks"}
+                </span>
                 ${
-        isoTime
-          ? `
-                  <time
-                    datetime="${escapeHtml(isoTime)}"
-                    title="${escapeHtml(isoTime)}"
-                    class="text-[11px] font-mono text-gray-500 flex items-center gap-1"
-                  >
-                    <span>🕒</span>
-                    <span>${escapeHtml(formattedTime)}</span>
-                  </time>
-                `
-          : ""
+        hasJournal
+          ? '<span class="inline-flex items-center gap-1 text-[10px] font-medium bg-emerald-950/70 text-emerald-300 border border-emerald-800/70 px-2 py-0.5 rounded-full">📖 Journal</span>'
+          : '<span class="inline-flex items-center gap-1 text-[10px] font-medium bg-gray-800/60 text-gray-400 border border-gray-700/50 px-2 py-0.5 rounded-full">No Journal</span>'
       }
               </div>
             </div>
 
-            <!-- Action Controls -->
-            <div class="flex items-center gap-1.5 self-start sm:self-center shrink-0 flex-wrap">
+            <!-- Job Description Preview (< 500 chars) -->
+            <div class="mt-1">
               ${
-        hasJournal
-          ? `
-                <button
-                  type="button"
-                  class="inline-flex items-center justify-center gap-1 transition-colors duration-150 focus:outline-none select-none bg-transparent hover:bg-gray-800 active:bg-gray-700 text-gray-400 hover:text-gray-200 font-medium border border-transparent px-2.5 py-1 text-xs rounded"
-                  onclick="copyMemoryContent('${
-            escapeHtml(journalEntryText).replace(/'/g, "\\'")
-          }')"
-                  title="Copy journal entry content"
-                >
-                  <span>📋</span>
-                  <span class="hidden sm:inline">Copy</span>
-                </button>
-              `
-          : ""
+        r.description
+          ? `<p class="text-xs text-gray-300 line-clamp-3 leading-relaxed">${
+            escapeHtml(
+              r.description,
+            )
+          }</p>`
+          : '<p class="text-xs text-gray-500 italic">No job description defined. Click Inspect to add responsibilities.</p>'
       }
+            </div>
+          </div>
 
+          <!-- Actions Footer -->
+          <div class="flex items-center justify-between pt-3 border-t border-gray-800/80 gap-2">
+            <button
+              type="button"
+              class="inline-flex items-center gap-1 text-xs font-semibold text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+              onclick="event.stopPropagation(); openRoleDetailModal('${escapeHtml(r.name)}')"
+            >
+              <span>🔍</span>
+              <span>Inspect Role</span>
+            </button>
+
+            <div class="flex items-center gap-1.5 shrink-0">
               <button
                 type="button"
-                class="inline-flex items-center justify-center gap-1 transition-colors duration-150 focus:outline-none select-none bg-transparent hover:bg-gray-800 active:bg-gray-700 text-gray-400 hover:text-gray-200 font-medium border border-transparent px-2.5 py-1 text-xs rounded"
-                onclick="openEditJournalModal('${escapeHtml(r.name)}', '${
-        hasJournal ? escapeHtml(journalEntryText).replace(/'/g, "\\'") : ""
-      }')"
-                title="${hasJournal ? "Edit journal entry" : "Write journal entry"}"
-              >
-                <span>${hasJournal ? "✏️" : "📝"}</span>
-                <span class="hidden sm:inline">${hasJournal ? "Edit" : "Write"}</span>
-              </button>
-
-              <button
-                type="button"
-                class="inline-flex items-center justify-center gap-1 transition-colors duration-150 focus:outline-none select-none bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-200 font-medium border border-gray-600 px-2.5 py-1 text-xs rounded shadow-sm"
-                onclick="viewRoleTasks('${escapeHtml(r.name)}')"
-                title="View tasks assigned to this role"
+                class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors cursor-pointer"
+                title="View tasks for this role"
+                onclick="event.stopPropagation(); viewRoleTasks('${escapeHtml(r.name)}')"
               >
                 <span>📋</span>
                 <span>Tasks</span>
               </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors cursor-pointer"
+                title="Edit role journal"
+                onclick="event.stopPropagation(); openEditJournalModal('${escapeHtml(r.name)}', '${
+        hasJournal ? escapeHtml(journalEntryText).replace(/'/g, "\\'") : ""
+      }')"
+              >
+                <span>📝</span>
+                <span>Journal</span>
+              </button>
             </div>
           </div>
-
-          <!-- Role Description (if provided) -->
-          ${
-        r.description
-          ? `
-            <p class="text-xs text-gray-400 italic">
-              ${escapeHtml(r.description)}
-            </p>
-          `
-          : ""
-      }
-
-          <!-- Markdown / Text Body -->
-          <div class="rounded-lg bg-gray-950/80 border border-gray-800/80 p-4 text-sm text-gray-200 font-sans leading-relaxed whitespace-pre-wrap break-words overflow-x-auto">
-            ${
-        hasJournal
-          ? escapeHtml(journalEntryText)
-          : '<span class="text-gray-600 italic">No journal snapshot recorded yet for this role.</span>'
-      }
-          </div>
-
-          <!-- Tags Row (if provided) -->
-          ${tagsHtml}
         </div>
       `;
     }).join("");
 
-    grid.innerHTML = `<div class="flex flex-col gap-4">${cardsHtml}</div>`;
+    grid.innerHTML =
+      `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${cardsHtml}</div>`;
+  }
+
+  function renderJournalsGrid() {
+    return renderRolesGrid();
   }
 
   function viewRoleTasks(roleName) {
@@ -1872,14 +1841,265 @@
     }
   }
 
+  /**
+   * Open the detailed Role Drill-Down Modal.
+   */
+  async function openRoleDetailModal(roleName) {
+    currentDetailRoleName = roleName;
+    const roleObj = allRoles.find(
+      (r) => (r.name || "").toLowerCase() === roleName.toLowerCase(),
+    ) || { name: roleName };
+
+    // 1. Populate Header
+    const nameEl = document.getElementById("roleDetailName");
+    if (nameEl) nameEl.textContent = `@${roleObj.name}`;
+
+    const avatarEl = document.getElementById("roleDetailAvatar");
+    if (avatarEl) {
+      const colors = getRoleColor(roleObj.name);
+      avatarEl.className =
+        `w-10 h-10 rounded-lg flex items-center justify-center font-mono font-bold text-base border ${colors.bg} ${colors.text} ${colors.border} shadow-sm shrink-0`;
+      avatarEl.textContent = (roleObj.name || "R").trim().charAt(0).toUpperCase() || "R";
+    }
+
+    const createdEl = document.getElementById("roleDetailCreatedAt");
+    if (createdEl) {
+      createdEl.textContent = roleObj.createdAt
+        ? `Created on ${new Date(roleObj.createdAt).toLocaleString()}`
+        : "Active Role";
+    }
+
+    // 2. Populate Job Description
+    const descInput = document.getElementById("roleDetailDescription");
+    if (descInput) {
+      descInput.value = roleObj.description || "";
+      updateRoleDescCharCounter();
+    }
+
+    // 3. Populate Journal Snapshot
+    const journalText = document.getElementById("roleDetailJournalText");
+    const journalMeta = document.getElementById("roleDetailJournalMeta");
+    if (roleObj.journal && roleObj.journal.entry) {
+      if (journalText) journalText.textContent = roleObj.journal.entry;
+      if (journalMeta) {
+        const author = roleObj.journal.writtenBy || "unknown";
+        const time = roleObj.journal.updatedAt || roleObj.journal.writtenAt;
+        journalMeta.textContent = `by ${author} • ${formatTimestamp(time)}`;
+      }
+    } else {
+      if (journalText) {
+        journalText.innerHTML =
+          '<span class="text-gray-500 italic">No active journal entry recorded for this role.</span>';
+      }
+      if (journalMeta) journalMeta.textContent = "No journal entry";
+    }
+
+    // 4. Populate Assigned Tasks
+    const matchingTasks = allTasks.filter(
+      (t) => (t.role || "").toLowerCase() === roleName.toLowerCase(),
+    );
+    const tasksCountEl = document.getElementById("roleDetailTasksCount");
+    if (tasksCountEl) {
+      tasksCountEl.textContent = `${matchingTasks.length} ${
+        matchingTasks.length === 1 ? "task" : "tasks"
+      }`;
+    }
+
+    const tasksList = document.getElementById("roleDetailTasksList");
+    if (tasksList) {
+      if (matchingTasks.length === 0) {
+        tasksList.innerHTML =
+          '<div class="p-3 text-center text-xs text-gray-500 italic">No tasks assigned to this role.</div>';
+      } else {
+        tasksList.innerHTML = matchingTasks.map((t) => `
+          <div
+            class="flex items-center justify-between gap-2 p-2 rounded-lg bg-gray-900 border border-gray-800 hover:border-gray-700 cursor-pointer transition-colors"
+            onclick="closeRoleDetailModal(); openTaskDetails('${escapeHtml(t.id)}')"
+          >
+            <div class="flex items-center gap-2 min-w-0">
+              <span class="font-mono text-xs font-semibold text-blue-400 shrink-0">${
+          escapeHtml(
+            t.id,
+          )
+        }</span>
+              <span class="text-xs text-gray-200 font-medium truncate">${
+          escapeHtml(
+            t.title,
+          )
+        }</span>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 border border-gray-700">${
+          escapeHtml(
+            t.status || "open",
+          )
+        }</span>
+              <span class="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-gray-800 text-gray-400 border border-gray-700">${
+          escapeHtml(
+            t.priority || "medium",
+          )
+        }</span>
+            </div>
+          </div>
+        `).join("");
+      }
+    }
+
+    // 5. Populate Role Memories (async fetch)
+    const memList = document.getElementById("roleDetailMemoriesList");
+    const memCountEl = document.getElementById("roleDetailMemoriesCount");
+    if (memList) {
+      memList.innerHTML =
+        '<div class="p-3 text-center text-xs text-gray-400">Loading role memories...</div>';
+      try {
+        const res = await fetch(`/api/memories?roleId=${encodeURIComponent(roleName)}`);
+        if (res.ok) {
+          const mData = await res.json();
+          const mems = mData.memories || [];
+          if (memCountEl) {
+            memCountEl.textContent = `${mems.length} ${mems.length === 1 ? "memory" : "memories"}`;
+          }
+          if (mems.length === 0) {
+            memList.innerHTML =
+              '<div class="p-3 text-center text-xs text-gray-500 italic w-full">No memories scoped to this role.</div>';
+          } else {
+            memList.innerHTML = mems.map((m) => `
+              <div
+                class="context-mem-chip flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-900 border border-gray-800 hover:border-blue-500 cursor-pointer transition-colors text-xs"
+                onclick="closeRoleDetailModal(); openMemoryDetailModal('${escapeHtml(m.id)}')"
+                title="${escapeHtml(m.summary || "")}"
+              >
+                <span class="font-mono text-sky-400 font-semibold">${escapeHtml(m.key)}</span>
+                <span class="text-[10px] text-emerald-400 font-mono">👁️ ${m.accessCount || 0}</span>
+              </div>
+            `).join("");
+          }
+        }
+      } catch (_) {
+        memList.innerHTML =
+          '<div class="p-3 text-center text-xs text-gray-500 italic w-full">Could not load role memories.</div>';
+      }
+    }
+
+    const modal = document.getElementById("roleDetailModal");
+    if (modal) modal.classList.add("open");
+  }
+
+  function closeRoleDetailModal() {
+    const modal = document.getElementById("roleDetailModal");
+    if (modal) modal.classList.remove("open");
+    currentDetailRoleName = null;
+  }
+
+  function copyRoleName() {
+    if (!currentDetailRoleName) return;
+    navigator.clipboard.writeText(currentDetailRoleName).then(() => {
+      showToast(`Role name @${currentDetailRoleName} copied!`);
+    }).catch(() => {
+      showToast("Could not copy role name", true);
+    });
+  }
+
+  function updateRoleDescCharCounter() {
+    const input = document.getElementById("roleDetailDescription");
+    const counter = document.getElementById("roleDetailCharCount");
+    if (!input || !counter) return;
+    const len = input.value.length;
+    counter.textContent = `${len} / 500`;
+    if (len > 500) {
+      counter.className = "text-xs font-mono text-rose-400 font-bold";
+    } else if (len > 450) {
+      counter.className = "text-xs font-mono text-amber-400";
+    } else {
+      counter.className = "text-xs font-mono text-gray-400";
+    }
+  }
+
+  function updateNewRoleDescCharCounter() {
+    const input = document.getElementById("newRoleDesc");
+    const counter = document.getElementById("newRoleDescCharCount");
+    if (!input || !counter) return;
+    const len = input.value.length;
+    counter.textContent = `${len} / 500`;
+    if (len > 500) {
+      counter.className = "text-[11px] font-mono text-rose-400 font-bold";
+    } else if (len > 450) {
+      counter.className = "text-[11px] font-mono text-amber-400";
+    } else {
+      counter.className = "text-[11px] font-mono text-gray-400";
+    }
+  }
+
+  /**
+   * Save role job description with client-side 500 char validation.
+   */
+  async function saveRoleDescription(roleName, newDesc) {
+    if (!roleName) {
+      showToast("Role name is missing", true);
+      return;
+    }
+
+    if (newDesc && newDesc.length > 500) {
+      showToast("Job description must be 500 characters or less", true);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/roles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: roleName,
+          description: newDesc ? newDesc.trim() : "",
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to update role description");
+      }
+
+      const data = await res.json();
+      const existing = allRoles.find(
+        (r) => (r.name || "").toLowerCase() === roleName.toLowerCase(),
+      );
+      if (existing) {
+        existing.description = data.role.description;
+      }
+
+      showToast(`Job description updated for @${roleName}`);
+      renderRolesGrid();
+    } catch (err) {
+      showToast(err.message, true);
+    }
+  }
+
+  function submitRoleDescriptionSave() {
+    if (!currentDetailRoleName) return;
+    const input = document.getElementById("roleDetailDescription");
+    const desc = input ? input.value : "";
+    saveRoleDescription(currentDetailRoleName, desc);
+  }
+
+  function openRoleDetailEditJournal() {
+    if (!currentDetailRoleName) return;
+    const roleObj = allRoles.find(
+      (r) => (r.name || "").toLowerCase() === currentDetailRoleName.toLowerCase(),
+    );
+    closeRoleDetailModal();
+    openEditJournalModal(currentDetailRoleName, roleObj?.journal?.entry || "");
+  }
+
   function openNewRoleModal() {
-    document.getElementById("newRoleName").value = "";
-    document.getElementById("newRoleDesc").value = "";
+    const nameEl = document.getElementById("newRoleName");
+    const descEl = document.getElementById("newRoleDesc");
+    if (nameEl) nameEl.value = "";
+    if (descEl) descEl.value = "";
+    updateNewRoleDescCharCounter();
     const modal = document.getElementById("newRoleModal");
     if (modal) modal.classList.add("open");
     setTimeout(() => {
-      const nameInput = document.getElementById("newRoleName");
-      if (nameInput) nameInput.focus();
+      if (nameEl) nameEl.focus();
     }, 50);
   }
 
@@ -1897,6 +2117,11 @@
       return;
     }
 
+    if (description && description.length > 500) {
+      showToast("Job description must be 500 characters or less", true);
+      return;
+    }
+
     try {
       const res = await fetch("/api/roles", {
         method: "POST",
@@ -1909,9 +2134,9 @@
         throw new Error(err.error || "Failed to create role");
       }
 
-      showToast("Role created: " + name);
+      showToast("Role created: @" + name);
       closeNewRoleModal();
-      loadJournals();
+      loadRoles();
     } catch (err) {
       showToast(err.message, true);
     }
@@ -1957,9 +2182,9 @@
         throw new Error(err.error || "Failed to update journal");
       }
 
-      showToast("Journal updated for role " + roleName);
+      showToast("Journal updated for role @" + roleName);
       closeEditJournalModal();
-      loadJournals();
+      loadRoles();
 
       if (currentTask && currentTask.role === roleName) {
         loadTaskContextDetails(currentTask);
@@ -1981,6 +2206,7 @@
           backdrop.classList.remove("open");
           if (backdrop.id === "taskDetailModal" || backdrop.id === "taskModal") currentTask = null;
           if (backdrop.id === "memoryDetailModal") currentMemory = null;
+          if (backdrop.id === "roleDetailModal") currentDetailRoleName = null;
         }
       });
     });
@@ -1993,6 +2219,7 @@
         closeMemoryDetailModal();
         closeNewMemoryModal();
         closeNewRoleModal();
+        closeRoleDetailModal();
         closeEditJournalModal();
       }
     });
@@ -2014,7 +2241,7 @@
         switchMainTab(e.state.tab, false);
       } else {
         const path = globalThis.location.pathname.replace(/^\//, "");
-        if (path === "memories" || path === "journals" || path === "tasks") {
+        if (path === "memories" || path === "journals" || path === "roles" || path === "tasks") {
           switchMainTab(path, false);
         } else {
           switchMainTab("tasks", false);
@@ -2038,32 +2265,28 @@
       memScope.addEventListener("change", () => renderMemoriesGrid());
     }
 
-    // Role Journals search & role tabs delegation
-    const journalSearch = document.getElementById("journal-search-input") ||
+    // Roles search listener
+    const roleSearch = document.getElementById("journal-search-input") ||
       document.getElementById("journalSearchInput");
-    if (journalSearch) {
-      journalSearch.addEventListener("input", () => renderJournalsGrid());
+    if (roleSearch) {
+      roleSearch.addEventListener("input", () => renderRolesGrid());
     }
-    const journalNav = document.querySelector('nav[aria-label="Role Journal Tabs"]');
-    if (journalNav) {
-      journalNav.addEventListener("click", (e) => {
-        const btn = e.target.closest("button");
-        if (!btn) return;
-        const tabId = btn.getAttribute("data-tab-id") ||
-          (btn.textContent.includes("All Roles")
-            ? "all"
-            : btn.textContent.trim().replace(/^@/, "").split(/\s+/)[0]);
-        if (tabId) {
-          filterJournalsByRole(tabId);
-        }
-      });
+
+    // Role description char counters
+    const newRoleDesc = document.getElementById("newRoleDesc");
+    if (newRoleDesc) {
+      newRoleDesc.addEventListener("input", updateNewRoleDescCharCounter);
+    }
+    const roleDetailDesc = document.getElementById("roleDetailDescription");
+    if (roleDetailDesc) {
+      roleDetailDesc.addEventListener("input", updateRoleDescCharCounter);
     }
 
     // Initial view load
     if (currentTab === "memories") {
       loadMemories();
-    } else if (currentTab === "journals") {
-      loadJournals();
+    } else if (currentTab === "roles" || currentTab === "journals") {
+      loadRoles();
     } else {
       loadTasks();
     }
@@ -2113,9 +2336,20 @@
   globalThis.closeNewMemoryModal = closeNewMemoryModal;
   globalThis.toggleScopeInputs = toggleScopeInputs;
   globalThis.submitNewMemory = submitNewMemory;
+  globalThis.loadRoles = loadRoles;
   globalThis.loadJournals = loadJournals;
+  globalThis.updateRoleMetrics = updateRoleMetrics;
   globalThis.updateJournalMetrics = updateJournalMetrics;
+  globalThis.renderRolesGrid = renderRolesGrid;
   globalThis.renderJournalsGrid = renderJournalsGrid;
+  globalThis.openRoleDetailModal = openRoleDetailModal;
+  globalThis.closeRoleDetailModal = closeRoleDetailModal;
+  globalThis.copyRoleName = copyRoleName;
+  globalThis.updateRoleDescCharCounter = updateRoleDescCharCounter;
+  globalThis.updateNewRoleDescCharCounter = updateNewRoleDescCharCounter;
+  globalThis.saveRoleDescription = saveRoleDescription;
+  globalThis.submitRoleDescriptionSave = submitRoleDescriptionSave;
+  globalThis.openRoleDetailEditJournal = openRoleDetailEditJournal;
   globalThis.viewRoleTasks = viewRoleTasks;
   globalThis.openNewRoleModal = openNewRoleModal;
   globalThis.closeNewRoleModal = closeNewRoleModal;

@@ -241,12 +241,51 @@ export async function handleMemoryRoutes(
         return errorResponse("Role name is required", 400);
       }
 
+      if (body.description !== undefined && body.description !== null) {
+        if (typeof body.description !== "string") {
+          return errorResponse("Role description must be a string", 400);
+        }
+        if (body.description.length > 500) {
+          return errorResponse("Job description must be 500 characters or less", 400);
+        }
+      }
+
       const role = await createRole({
         name: body.name.trim(),
         description: typeof body.description === "string" ? body.description.trim() : undefined,
       }, userId);
 
       return jsonResponse({ role }, 201);
+    } catch (err) {
+      return errorResponse(err instanceof Error ? err.message : String(err), 400);
+    }
+  }
+
+  // Role sub-resource matching: /api/roles/:role
+  const roleMatch = path.match(/^\/api\/roles\/([^/]+)$/);
+  if (roleMatch && (method === "PATCH" || method === "PUT")) {
+    try {
+      const roleName = decodeURIComponent(roleMatch[1]);
+      const body = await req.json();
+      if (!body || typeof body !== "object") {
+        return errorResponse("Invalid JSON payload", 400);
+      }
+
+      if (body.description !== undefined && body.description !== null) {
+        if (typeof body.description !== "string") {
+          return errorResponse("Role description must be a string", 400);
+        }
+        if (body.description.length > 500) {
+          return errorResponse("Job description must be 500 characters or less", 400);
+        }
+      }
+
+      const role = await createRole({
+        name: roleName,
+        description: typeof body.description === "string" ? body.description.trim() : undefined,
+      }, userId);
+
+      return jsonResponse({ role }, 200);
     } catch (err) {
       return errorResponse(err instanceof Error ? err.message : String(err), 400);
     }

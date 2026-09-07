@@ -60,6 +60,24 @@ Deno.test("Role MCP Tools - role_create and role_list", async () => {
     const listResBoth = await roleListTool.execute({});
     assert(!listResBoth.isError);
     assertEquals(listResBoth.content.length, 2);
+
+    // 6. Role create validation: <= 500 chars succeeds, > 500 chars fails
+    const valid500 = "a".repeat(500);
+    const validRes = await roleCreateTool.execute({
+      name: "valid-desc-role",
+      description: valid500,
+    });
+    assert(!validRes.isError);
+    const validData = parseJsonContent(validRes);
+    assertEquals(validData.role.description.length, 500);
+
+    const invalid501 = "a".repeat(501);
+    const invalidRes = await roleCreateTool.execute({
+      name: "invalid-desc-role",
+      description: invalid501,
+    });
+    assert(invalidRes.isError, "role_create with description > 500 chars should fail");
+    assertStringIncludes(invalidRes.content[0].text, "500 characters");
   } finally {
     kv.close();
   }

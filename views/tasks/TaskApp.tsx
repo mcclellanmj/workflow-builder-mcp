@@ -4,11 +4,11 @@ import { TaskCard, type TaskCardItem } from "./TaskCard.tsx";
 import { TaskModal } from "./TaskModal.tsx";
 import type { TaskModalItem, TaskModalMode } from "./TaskModal.tsx";
 import { MemoryVault } from "../memory/MemoryVault.tsx";
-import { MemoryCard } from "../memory/MemoryCard.tsx";
 import type { MemoryCardItem, MemoryMetrics } from "../memory/MemoryVault.tsx";
-import { JournalView } from "../journal/JournalView.tsx";
+import { MemoryCard } from "../memory/MemoryCard.tsx";
 import { JournalEntryCard } from "../journal/JournalEntryCard.tsx";
 import type { JournalEntry, RoleItem } from "../journal/JournalView.tsx";
+import { RolesView } from "../roles/RolesView.tsx";
 
 // Helper to emit raw event handler attributes in SSR without TypeScript JSX type errors
 // deno-lint-ignore no-explicit-any
@@ -28,7 +28,7 @@ export interface TaskAppProps {
   origin?: string;
   userId?: string;
   userName?: string;
-  initialTab?: "tasks" | "memories" | "journals" | string;
+  initialTab?: "tasks" | "memories" | "journals" | "roles" | string;
   tasks?: TaskCardItem[];
   readyTaskIds?: Set<string> | string[];
   memories?: MemoryCardItem[];
@@ -96,7 +96,7 @@ export function TaskApp({
 
   const headerActionText = currentTab === "memories"
     ? "New Memory"
-    : currentTab === "journals"
+    : (currentTab === "roles" || currentTab === "journals")
     ? "New Role"
     : "New Task";
 
@@ -217,12 +217,14 @@ export function TaskApp({
               🧠 Memory Vault
             </a>
             <a
-              href="/journals"
-              class={currentTab === "journals" ? "nav-tab active" : "nav-tab"}
-              id="tab-btn-journals"
-              {...rawAttr({ onclick: "switchMainTab('journals', event)" })}
+              href="/roles"
+              class={(currentTab === "roles" || currentTab === "journals")
+                ? "nav-tab active"
+                : "nav-tab"}
+              id="tab-btn-roles"
+              {...rawAttr({ onclick: "switchMainTab('roles', event)" })}
             >
-              📖 Engineering Journals
+              👥 Roles
             </a>
             <span class="h-4 w-px bg-gray-800 mx-1 hidden md:inline-block" aria-hidden="true" />
             <a
@@ -286,16 +288,16 @@ export function TaskApp({
           />
         </div>
 
-        {/* 3. Role Journals View */}
+        {/* 3. Roles View */}
         <div
-          id="journalsView"
+          id="rolesView"
           class={`main-view flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 ${
-            currentTab === "journals" ? "" : "hidden"
+            (currentTab === "roles" || currentTab === "journals") ? "" : "hidden"
           }`}
         >
-          <JournalView
-            entries={journalEntries}
+          <RolesView
             roles={roles}
+            entries={journalEntries}
           />
         </div>
       </main>
@@ -609,6 +611,170 @@ export function TaskApp({
         </div>
       </div>
 
+      {/* Role Detail & Drill-Down Modal */}
+      <div
+        class="modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto hidden"
+        id="roleDetailModal"
+        {...rawAttr({ onclick: "if(event.target===this) closeRoleDetailModal()" })}
+      >
+        <div class="modal relative w-full max-w-3xl bg-gray-900 border border-gray-800 rounded-xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
+          {/* Modal Header: Avatar, Role Name, Created Date, Copy Button, Close */}
+          <div class="modal-header flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-gray-900/80">
+            <div class="flex items-center gap-3">
+              <div
+                id="roleDetailAvatar"
+                class="w-10 h-10 rounded-lg flex items-center justify-center font-mono font-bold text-base border bg-blue-950/70 text-blue-400 border-blue-800/60 shadow-sm shrink-0"
+              >
+                R
+              </div>
+              <div class="flex flex-col">
+                <div class="flex items-center gap-2">
+                  <span id="roleDetailName" class="font-mono text-base font-bold text-gray-100">
+                    @role
+                  </span>
+                  <button
+                    type="button"
+                    class="text-xs text-gray-400 hover:text-gray-200 px-1.5 py-0.5 rounded bg-gray-800 hover:bg-gray-700 transition-colors"
+                    title="Copy role name"
+                    {...rawAttr({ onclick: "copyRoleName()" })}
+                  >
+                    📋
+                  </button>
+                </div>
+                <span id="roleDetailCreatedAt" class="text-xs text-gray-400 font-mono">
+                  Created recently
+                </span>
+              </div>
+            </div>
+            <button
+              class="btn btn-secondary btn-sm px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
+              {...rawAttr({ onclick: "closeRoleDetailModal()" })}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Modal Body */}
+          <div class="modal-body p-6 overflow-y-auto space-y-6">
+            {/* 1. Job Description Section with live counter and quick save */}
+            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                  <span>💼</span>
+                  <span>Role Job Description</span>
+                  <span class="text-[10px] text-gray-500 font-normal">(&le; 500 characters)</span>
+                </label>
+                <span id="roleDetailCharCount" class="text-xs font-mono text-gray-400">
+                  0 / 500
+                </span>
+              </div>
+              <textarea
+                id="roleDetailDescription"
+                maxlength={500}
+                class="form-control w-full rounded-md bg-gray-900 border border-gray-700 text-gray-200 text-xs px-3 py-2 min-h-[80px] resize-y"
+                placeholder="Operational responsibilities, scope, and duties for this role..."
+                {...rawAttr({ oninput: "updateRoleDescCharCounter()" })}
+              />
+              <div class="flex justify-end pt-1">
+                <button
+                  type="button"
+                  id="btnSaveRoleDesc"
+                  class="btn px-3 py-1.5 text-xs font-semibold rounded bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer"
+                  {...rawAttr({ onclick: "submitRoleDescriptionSave()" })}
+                >
+                  Save Description
+                </button>
+              </div>
+            </div>
+
+            {/* 2. Current Journal Snapshot */}
+            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm">📖</span>
+                  <span class="text-xs font-bold uppercase tracking-wider text-gray-400">
+                    Current Journal Snapshot
+                  </span>
+                </div>
+                <div id="roleDetailJournalMeta" class="text-[11px] text-gray-400 font-mono">
+                  -
+                </div>
+              </div>
+
+              <div
+                id="roleDetailJournalText"
+                class="rounded-lg bg-gray-900/90 border border-gray-800 p-3.5 text-xs text-gray-200 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed"
+              >
+                No active journal entry recorded for this role.
+              </div>
+
+              <div class="flex justify-end">
+                <button
+                  type="button"
+                  class="btn btn-secondary px-3 py-1.5 text-xs font-medium rounded bg-gray-800 hover:bg-gray-700 text-gray-200 transition-colors flex items-center gap-1 cursor-pointer"
+                  {...rawAttr({ onclick: "openRoleDetailEditJournal()" })}
+                >
+                  <span>✏️</span>
+                  <span>Edit Journal</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 3. Assigned Tasks */}
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                  <span>📋</span>
+                  <span>Assigned Tasks</span>
+                </label>
+                <span id="roleDetailTasksCount" class="text-xs font-mono text-gray-400">
+                  0 tasks
+                </span>
+              </div>
+              <div
+                id="roleDetailTasksList"
+                class="max-h-48 overflow-y-auto border border-gray-800 rounded-xl bg-gray-950 p-2 space-y-1.5"
+              >
+                <div class="p-3 text-center text-xs text-gray-500 italic">
+                  No tasks assigned to this role.
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Role Memories */}
+            <div class="space-y-2">
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-bold uppercase tracking-wider text-gray-400 flex items-center gap-1.5">
+                  <span>🧠</span>
+                  <span>Role Memories</span>
+                </label>
+                <span id="roleDetailMemoriesCount" class="text-xs font-mono text-gray-400">
+                  0 memories
+                </span>
+              </div>
+              <div
+                id="roleDetailMemoriesList"
+                class="max-h-40 overflow-y-auto border border-gray-800 rounded-xl bg-gray-950 p-2 flex flex-wrap gap-1.5"
+              >
+                <div class="p-3 text-center text-xs text-gray-500 italic w-full">
+                  No memories scoped to this role.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Modal Footer */}
+          <div class="modal-footer flex items-center justify-end px-6 py-3 border-t border-gray-800 bg-gray-900/80">
+            <button
+              class="btn btn-secondary px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium cursor-pointer"
+              {...rawAttr({ onclick: "closeRoleDetailModal()" })}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* New Role Modal */}
       <div
         class="modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto hidden"
@@ -644,13 +810,20 @@ export function TaskApp({
             </div>
 
             <div class="form-group flex flex-col gap-1">
-              <label class="text-xs font-bold uppercase tracking-wider text-gray-400">
-                Description
-              </label>
+              <div class="flex items-center justify-between">
+                <label class="text-xs font-bold uppercase tracking-wider text-gray-400">
+                  Job Description (&le; 500 chars)
+                </label>
+                <span id="newRoleDescCharCount" class="text-[11px] font-mono text-gray-400">
+                  0 / 500
+                </span>
+              </div>
               <textarea
                 id="newRoleDesc"
+                maxlength={500}
                 class="form-control w-full rounded-md bg-gray-950 border border-gray-700 text-gray-200 text-xs px-3 py-2 min-h-[90px] resize-y"
-                placeholder="Responsibilities and scope for this role..."
+                placeholder="Responsibilities, duties, and scope for this role (&le; 500 characters)..."
+                {...rawAttr({ oninput: "updateNewRoleDescCharCounter()" })}
               />
             </div>
           </div>

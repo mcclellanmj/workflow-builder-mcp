@@ -14,7 +14,7 @@ export interface TaskUiOptions {
   origin: string;
   userId?: string;
   userName?: string;
-  initialTab?: "tasks" | "memories" | "journals";
+  initialTab?: "tasks" | "memories" | "journals" | "roles";
 }
 
 /**

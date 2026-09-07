@@ -30,8 +30,11 @@ export async function handleTaskRoutes(
   const path = url.pathname;
   const method = req.method.toUpperCase();
 
-  // 1. Web UI: GET /tasks, GET /memories, GET /journals
-  if ((path === "/tasks" || path === "/memories" || path === "/journals") && method === "GET") {
+  // 1. Web UI: GET /tasks, GET /memories, GET /journals, GET /roles
+  if (
+    (path === "/tasks" || path === "/memories" || path === "/journals" || path === "/roles") &&
+    method === "GET"
+  ) {
     if (!auth) {
       return new Response(null, {
         status: 302,
@@ -44,7 +47,7 @@ export async function handleTaskRoutes(
 
     const initialTab = path === "/memories"
       ? "memories"
-      : (path === "/journals" ? "journals" : "tasks");
+      : (path === "/journals" || path === "/roles" ? "roles" : "tasks");
     return renderTasksHtml({
       origin: url.origin,
       userId: auth.userId,
