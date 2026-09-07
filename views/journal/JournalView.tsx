@@ -187,7 +187,7 @@ export function JournalView({
               <span class="text-[10px] uppercase font-semibold tracking-wider text-gray-500">
                 Roles
               </span>
-              <span class="font-mono font-bold text-sm text-gray-200">
+              <span id="journalStatRoles" class="font-mono font-bold text-sm text-gray-200">
                 {allRoleNames.length}
               </span>
             </div>
@@ -199,7 +199,7 @@ export function JournalView({
               <span class="text-[10px] uppercase font-semibold tracking-wider text-emerald-400">
                 Entries
               </span>
-              <span class="font-mono font-bold text-sm text-emerald-300">
+              <span id="journalStatEntries" class="font-mono font-bold text-sm text-emerald-300">
                 {entries.length}
               </span>
             </div>

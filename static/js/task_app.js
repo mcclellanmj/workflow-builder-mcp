@@ -83,38 +83,61 @@
    * Switch active top-level tab (tasks, memories, journals).
    */
   function switchMainTab(tab, updateHistory = true) {
-    if (updateHistory && typeof updateHistory === "object" && typeof updateHistory.preventDefault === "function") {
+    if (
+      updateHistory && typeof updateHistory === "object" &&
+      typeof updateHistory.preventDefault === "function"
+    ) {
       updateHistory.preventDefault();
       updateHistory = true;
     }
-    currentTab = tab;
+    const safeTab = (tab === "memories" || tab === "journals") ? tab : "tasks";
+    currentTab = safeTab;
 
     // Update navigation buttons
     document.querySelectorAll(".nav-tab").forEach((btn) => btn.classList.remove("active"));
-    const activeBtn = document.getElementById("tab-btn-" + tab);
+    const activeBtn = document.getElementById("tab-btn-" + safeTab);
     if (activeBtn) activeBtn.classList.add("active");
 
     // Update header action button label
     const actionText = document.getElementById("headerActionBtnText");
     if (actionText) {
-      if (tab === "tasks") actionText.textContent = "New Task";
-      else if (tab === "memories") actionText.textContent = "New Memory";
-      else if (tab === "journals") actionText.textContent = "New Role";
+      if (safeTab === "tasks") actionText.textContent = "New Task";
+      else if (safeTab === "memories") actionText.textContent = "New Memory";
+      else if (safeTab === "journals") actionText.textContent = "New Role";
     }
 
-    // Toggle view containers
-    document.querySelectorAll(".main-view").forEach((v) => v.classList.add("hidden"));
-    const activeView = document.getElementById(tab + "View");
-    if (activeView) activeView.classList.remove("hidden");
+    // Toggle view containers cleanly
+    const tabViews = ["tasksView", "memoriesView", "journalsView"];
+    tabViews.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.classList.add("hidden");
+    });
+    // Ensure any elements with .main-view that match top views are hidden
+    document.querySelectorAll(".main-view").forEach((v) => {
+      if (tabViews.includes(v.id)) {
+        v.classList.add("hidden");
+      }
+    });
+
+    const activeView = document.getElementById(safeTab + "View");
+    if (activeView) {
+      activeView.classList.remove("hidden");
+      // Safety: ensure any nested containers inside active view don't get stuck hidden
+      activeView.querySelectorAll(".main-view.hidden, .kanban-board-container.hidden").forEach(
+        (child) => {
+          child.classList.remove("hidden");
+        },
+      );
+    }
 
     if (updateHistory) {
-      globalThis.history.pushState({ tab }, "", "/" + tab);
+      globalThis.history.pushState({ tab: safeTab }, "", "/" + safeTab);
     }
 
     // Load corresponding dataset
-    if (tab === "tasks") loadTasks();
-    else if (tab === "memories") loadMemories();
-    else if (tab === "journals") loadJournals();
+    if (safeTab === "tasks") loadTasks();
+    else if (safeTab === "memories") loadMemories();
+    else if (safeTab === "journals") loadJournals();
   }
 
   /**
@@ -134,6 +157,15 @@
    * Fetch all tasks and ready-frontier tasks from API.
    */
   async function loadTasks(showNotification = false) {
+    const openLane = document.getElementById("lane-open");
+    if (openLane && allTasks.length === 0) {
+      openLane.innerHTML = `
+        <div class="flex flex-col items-center justify-center p-8 text-center text-gray-400 gap-2">
+          <div class="w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <span class="text-xs font-medium">Loading tasks...</span>
+        </div>
+      `;
+    }
     try {
       const [tasksRes, readyRes] = await Promise.all([
         fetch("/api/tasks"),
@@ -153,6 +185,15 @@
       if (showNotification) showToast("Tasks refreshed");
     } catch (err) {
       showToast(err.message, true);
+      if (openLane && allTasks.length === 0) {
+        openLane.innerHTML = `
+          <div class="flex flex-col items-center justify-center p-6 text-center text-rose-400 gap-2">
+            <span class="text-xl">⚠️</span>
+            <span class="text-xs font-medium">${escapeHtml(err.message)}</span>
+            <button type="button" class="btn btn-sm px-2.5 py-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-200 rounded mt-1" onclick="loadTasks(true)">Retry</button>
+          </div>
+        `;
+      }
     }
   }
 
@@ -277,8 +318,9 @@
     Object.keys(lanes).forEach((k) => {
       if (counts[k] === 0 && lanes[k]) {
         const empty = document.createElement("div");
-        empty.className = "empty-state";
-        empty.textContent = "No tasks in this lane";
+        empty.className =
+          "flex flex-col items-center justify-center p-6 text-center text-gray-500 rounded-lg border border-dashed border-gray-800/80 my-2";
+        empty.innerHTML = `<span class="text-xs font-medium">No tasks in this lane</span>`;
         lanes[k].appendChild(empty);
       }
     });
@@ -294,7 +336,8 @@
    */
   function createTaskCard(task) {
     const card = document.createElement("div");
-    card.className = "task-card";
+    card.className =
+      "task-card group relative flex flex-col gap-2.5 p-3.5 rounded-xl bg-gray-900/90 border border-gray-800 hover:border-gray-700 hover:bg-gray-850 hover:shadow-lg transition-all duration-150 cursor-pointer select-none";
     card.draggable = true;
     card.id = "card-" + task.id;
 
@@ -308,45 +351,75 @@
 
     card.onclick = () => openTaskDetails(task.id);
 
-    const typeClass = "badge-" + (task.type || "task");
-    const priorityClass = "priority-" + (task.priority || "medium");
     const isReady = readyTaskIds.has(task.id);
     const commentsCount = (task.comments && Array.isArray(task.comments))
       ? task.comments.length
       : 0;
 
+    const typeStyle = task.type === "epic"
+      ? "bg-purple-950/70 text-purple-300 border border-purple-800/60"
+      : (task.type === "bug"
+        ? "bg-rose-950/80 text-rose-300 border border-rose-800/60"
+        : (task.type === "subtask"
+          ? "bg-slate-800/80 text-slate-300 border border-slate-700/60"
+          : "bg-cyan-950/70 text-cyan-300 border border-cyan-800/60"));
+
+    const priorityStyle = task.priority === "critical"
+      ? "bg-red-950/80 text-red-300 border border-red-800/60"
+      : (task.priority === "high"
+        ? "bg-amber-950/80 text-amber-300 border border-amber-800/60"
+        : (task.priority === "low"
+          ? "bg-slate-800/80 text-slate-400 border border-slate-700/60"
+          : "bg-blue-950/80 text-blue-300 border border-blue-800/60"));
+
     card.innerHTML = `
-      <div class="card-top">
-        <span class="task-id">${escapeHtml(task.id)}</span>
-        <div class="badges-row">
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-mono text-xs font-semibold text-blue-400">
+          ${escapeHtml(task.id)}
+        </span>
+        <div class="flex items-center gap-1.5 flex-wrap">
           ${
       isReady
-        ? '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;" title="Ready frontier">⚡ READY</span>'
+        ? '<span class="inline-flex items-center gap-1 font-medium select-none bg-emerald-950/70 text-emerald-300 border border-emerald-800/70 px-2 py-0.5 text-[11px] rounded-full" title="Ready frontier">⚡ READY</span>'
         : ""
     }
-          <span class="badge ${typeClass}">${escapeHtml((task.type || "task").toUpperCase())}</span>
-          <span class="badge ${priorityClass}">${
-      escapeHtml((task.priority || "medium").toUpperCase())
-    }</span>
+          <span class="inline-flex items-center gap-1 font-medium uppercase select-none px-2 py-0.5 text-[11px] rounded-full ${typeStyle}">
+            ${escapeHtml(task.type || "task")}
+          </span>
+          <span class="inline-flex items-center gap-1 font-medium uppercase select-none px-2 py-0.5 text-[11px] rounded-full ${priorityStyle}">
+            ${escapeHtml(task.priority || "medium")}
+          </span>
         </div>
       </div>
-      <div class="card-title">${escapeHtml(task.title)}</div>
-      ${task.description ? '<div class="card-desc">' + escapeHtml(task.description) + "</div>" : ""}
-      <div class="card-footer">
-        <div class="card-assignee">
+      <h4 class="text-sm font-medium text-gray-100 leading-snug line-clamp-2">
+        ${escapeHtml(task.title)}
+      </h4>
+      ${
+      task.description
+        ? `<p class="text-xs text-gray-400 line-clamp-2 leading-relaxed">${
+          escapeHtml(task.description)
+        }</p>`
+        : ""
+    }
+      <div class="flex items-center justify-between gap-2 pt-2 border-t border-gray-800/80 text-xs text-gray-400">
+        <div class="flex items-center gap-1.5 min-w-0">
           ${
       task.assignee
-        ? "👤 " + escapeHtml(task.assignee)
+        ? `<span class="inline-flex items-center gap-1 text-gray-300"><span>👤</span><span class="truncate font-mono">${
+          escapeHtml(task.assignee)
+        }</span></span>`
         : (task.role
-          ? "🏷️ " + escapeHtml(task.role)
-          : '<span style="color: var(--text-dim);">Unassigned</span>')
+          ? `<span class="inline-flex items-center gap-1 bg-indigo-950/60 text-indigo-300 border border-indigo-800/60 px-2 py-0.5 text-[10px] rounded-full font-mono uppercase">@${
+            escapeHtml(task.role)
+          }</span>`
+          : '<span class="text-gray-500 italic">Unassigned</span>')
     }
         </div>
-        <div class="card-meta-icons">
-          ${
-      commentsCount > 0 ? '<span class="comment-count-chip">💬 ' + commentsCount + "</span>" : ""
+        ${
+      commentsCount > 0
+        ? `<span class="inline-flex items-center gap-1 text-[11px] text-gray-400 bg-gray-800/70 border border-gray-700/60 px-1.5 py-0.5 rounded">💬 ${commentsCount}</span>`
+        : ""
     }
-        </div>
       </div>
     `;
 
@@ -451,7 +524,8 @@
       // Fetch and render context-aware Role Journal & Scoped Memories
       loadTaskContextDetails(currentTask);
 
-      const modalEl = document.getElementById("taskModal") || document.getElementById("taskDetailModal");
+      const modalEl = document.getElementById("taskModal") ||
+        document.getElementById("taskDetailModal");
       if (modalEl) modalEl.classList.add("open");
       const innerModal = document.getElementById("taskDetailModal");
       if (innerModal) innerModal.classList.add("open");
@@ -774,7 +848,8 @@
   }
 
   function closeModal() {
-    const modal = document.getElementById("taskModal") || document.getElementById("taskDetailModal");
+    const modal = document.getElementById("taskModal") ||
+      document.getElementById("taskDetailModal");
     if (modal) modal.classList.remove("open");
     const inner = document.getElementById("taskDetailModal");
     if (inner) inner.classList.remove("open");
@@ -789,7 +864,8 @@
     document.getElementById("newRole").value = "";
     document.getElementById("newAssignee").value = "";
     document.getElementById("newParentTaskId").value = "";
-    const modal = document.getElementById("createTaskModal") || document.getElementById("newTaskModal");
+    const modal = document.getElementById("createTaskModal") ||
+      document.getElementById("newTaskModal");
     if (modal) modal.classList.add("open");
     const inner = document.getElementById("newTaskModal");
     if (inner) inner.classList.add("open");
@@ -800,7 +876,8 @@
   }
 
   function closeNewTaskModal() {
-    const modal = document.getElementById("createTaskModal") || document.getElementById("newTaskModal");
+    const modal = document.getElementById("createTaskModal") ||
+      document.getElementById("newTaskModal");
     if (modal) modal.classList.remove("open");
     const inner = document.getElementById("newTaskModal");
     if (inner) inner.classList.remove("open");
@@ -853,6 +930,15 @@
    * Fetch all memories from Memory Vault API.
    */
   async function loadMemories(showNotification = false) {
+    const grid = document.getElementById("memoriesGrid");
+    if (grid && allMemories.length === 0) {
+      grid.innerHTML = `
+        <div class="flex flex-col items-center justify-center p-12 text-center text-gray-400 gap-3">
+          <div class="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+          <p class="text-sm font-medium">Loading Memory Vault records...</p>
+        </div>
+      `;
+    }
     try {
       const res = await fetch("/api/memories");
       if (!res.ok) throw new Error("Failed to load memories");
@@ -864,6 +950,15 @@
       if (showNotification) showToast("Memory Vault refreshed");
     } catch (err) {
       showToast(err.message, true);
+      if (grid && allMemories.length === 0) {
+        grid.innerHTML = `
+          <div class="flex flex-col items-center justify-center p-12 text-center text-rose-400 gap-3 bg-gray-900/40 rounded-xl border border-rose-900/30">
+            <span class="text-3xl">⚠️</span>
+            <p class="text-sm font-medium">Failed to load memories: ${escapeHtml(err.message)}</p>
+            <button type="button" class="btn btn-sm btn-secondary px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs mt-2" onclick="loadMemories(true)">Retry</button>
+          </div>
+        `;
+      }
     }
   }
 
@@ -883,17 +978,114 @@
     if (statAccess) statAccess.textContent = totalAccess;
   }
 
+  function formatValuePreview(raw) {
+    if (raw === undefined || raw === null) return { isJson: false, text: "" };
+    const str = typeof raw === "object" ? JSON.stringify(raw, null, 2) : String(raw);
+    const trimmed = str.trim();
+    if (
+      (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))
+    ) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return { isJson: true, text: JSON.stringify(parsed, null, 2) };
+      } catch {
+        // Fall through to plain text
+      }
+    }
+    return { isJson: false, text: trimmed };
+  }
+
+  function formatTimestamp(isoString) {
+    if (!isoString) return "-";
+    try {
+      const d = new Date(isoString);
+      if (isNaN(d.getTime())) return isoString;
+      return d.toLocaleString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return isoString;
+    }
+  }
+
+  function getRoleColor(role) {
+    const normalized = (role || "").toLowerCase();
+    if (normalized.includes("dev") || normalized.includes("engineer")) {
+      return { bg: "bg-blue-950/70", text: "text-blue-400", border: "border-blue-800/60" };
+    }
+    if (normalized.includes("arch") || normalized.includes("lead")) {
+      return { bg: "bg-purple-950/70", text: "text-purple-400", border: "border-purple-800/60" };
+    }
+    if (normalized.includes("review") || normalized.includes("qa") || normalized.includes("test")) {
+      return { bg: "bg-emerald-950/70", text: "text-emerald-400", border: "border-emerald-800/60" };
+    }
+    if (normalized.includes("sec") || normalized.includes("ops")) {
+      return { bg: "bg-rose-950/70", text: "text-rose-400", border: "border-rose-800/60" };
+    }
+    return { bg: "bg-indigo-950/70", text: "text-indigo-400", border: "border-indigo-800/60" };
+  }
+
+  function filterMemoriesByRole(roleId) {
+    const roleSelect = document.getElementById("memory-role-select");
+    if (roleSelect) {
+      roleSelect.value = roleId;
+    }
+    renderMemoriesGrid();
+  }
+
+  let activeJournalRoleTab = "all";
+
+  function filterJournalsByRole(roleName) {
+    activeJournalRoleTab = roleName || "all";
+    updateJournalTabsUi(activeJournalRoleTab);
+    renderJournalsGrid();
+  }
+
+  function updateJournalTabsUi(selectedTabId) {
+    const nav = document.querySelector('nav[aria-label="Role Journal Tabs"]');
+    if (!nav) return;
+    const buttons = nav.querySelectorAll("button");
+    buttons.forEach((btn) => {
+      const tabId = btn.getAttribute("data-tab-id") ||
+        (btn.textContent.includes("All Roles")
+          ? "all"
+          : btn.textContent.trim().replace(/^@/, "").split(/\s+/)[0]);
+      const isActive =
+        (selectedTabId === "all" && (tabId === "all" || btn.textContent.includes("All Roles"))) ||
+        tabId.toLowerCase() === selectedTabId.toLowerCase();
+      if (isActive) {
+        btn.setAttribute("aria-current", "true");
+        btn.className =
+          "group inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors duration-150 select-none whitespace-nowrap focus:outline-none border-blue-500 text-blue-400 font-semibold";
+      } else {
+        btn.removeAttribute("aria-current");
+        btn.className =
+          "group inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors duration-150 select-none whitespace-nowrap focus:outline-none border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-600";
+      }
+    });
+  }
+
   function getFilteredMemories() {
-    const searchEl = document.getElementById("memSearchInput");
-    const scopeEl = document.getElementById("memScopeFilter");
+    const searchEl = document.getElementById("memory-search-input") ||
+      document.getElementById("memSearchInput");
+    const scopeEl = document.getElementById("memory-scope-select") ||
+      document.getElementById("memScopeFilter");
+    const roleEl = document.getElementById("memory-role-select");
     const tagEl = document.getElementById("memTagFilter");
 
     const search = (searchEl ? searchEl.value : "").toLowerCase().trim();
     const scopeFilter = scopeEl ? scopeEl.value : "";
+    const roleFilter = (roleEl ? roleEl.value : "").toLowerCase().trim();
     const tagFilter = (tagEl ? tagEl.value : "").toLowerCase().trim();
 
     return allMemories.filter((m) => {
       if (scopeFilter && m.scope !== scopeFilter) return false;
+      if (roleFilter && (m.roleId || "").toLowerCase() !== roleFilter) return false;
 
       if (tagFilter) {
         if (!m.tags || !m.tags.some((t) => t.toLowerCase().includes(tagFilter))) {
@@ -907,8 +1099,9 @@
         const matchWorkflow = (m.workflowId || "").toLowerCase().includes(search);
         const matchNode = (m.nodeId || "").toLowerCase().includes(search);
         const matchRole = (m.roleId || "").toLowerCase().includes(search);
-        const matchContent = (m.content || "").toLowerCase().includes(search);
-        const matchTags = m.tags && m.tags.some((t) => t.toLowerCase().includes(search));
+        const matchContent = (m.content || m.value || "").toLowerCase().includes(search);
+        const matchTags = m.tags && Array.isArray(m.tags) &&
+          m.tags.some((t) => t.toLowerCase().includes(search));
         if (
           !matchKey && !matchSummary && !matchWorkflow && !matchNode && !matchRole &&
           !matchContent && !matchTags
@@ -927,53 +1120,218 @@
     const filtered = getFilteredMemories();
 
     if (filtered.length === 0) {
-      grid.innerHTML = '<div class="empty-state">No memories found in the vault.</div>';
+      const isFiltered = Boolean(
+        (document.getElementById("memory-search-input") ||
+          document.getElementById("memSearchInput"))?.value ||
+          (document.getElementById("memory-scope-select") ||
+            document.getElementById("memScopeFilter"))?.value ||
+          document.getElementById("memory-role-select")?.value,
+      );
+      grid.innerHTML = `
+        <div class="flex flex-col items-center justify-center p-12 text-center text-gray-400 gap-3 bg-gray-900/40 rounded-xl border border-gray-800">
+          <span class="text-3xl">${isFiltered ? "🔍" : "🧠"}</span>
+          <h3 class="text-base font-semibold text-gray-200">${
+        isFiltered ? "No matching memories" : "No memories found"
+      }</h3>
+          <p class="text-sm text-gray-400 max-w-md">${
+        isFiltered
+          ? "No memories matched your search query or scope filter. Try clearing filters or searching for another term."
+          : "The Memory Vault has no saved records yet. Save your first memory to persist knowledge across task runs and engineering roles."
+      }</p>
+          ${
+        !isFiltered
+          ? `
+            <button type="button" class="btn btn-sm btn-primary inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-sm transition-colors cursor-pointer mt-2" onclick="openNewMemoryModal()">
+              <span>➕</span>
+              <span>Save First Memory</span>
+            </button>
+          `
+          : ""
+      }
+        </div>
+      `;
       return;
     }
 
-    grid.innerHTML = filtered.map((m) => {
-      const scopeBadgeClass = "scope-badge-" + (m.scope || "workflow");
-      const targetRef = m.scope === "workflow"
-        ? ("Workflow: " + (m.workflowId || "global"))
-        : (m.scope === "node"
-          ? ("Node: " + (m.nodeId || "-") + " in " + (m.workflowId || "-"))
-          : (m.scope === "role" ? ("Role: " + (m.roleId || "-")) : ""));
+    const cardsHtml = filtered.map((m) => {
+      const rawContent = m.content ?? m.value ?? "";
+      const preview = formatValuePreview(rawContent);
+      const timeLabel = formatTimestamp(m.updatedAt || m.createdAt);
+
+      const scope = m.scope || (m.roleId ? "role" : "workflow");
+      const targetRef = m.workflowId
+        ? ("Workflow: " + m.workflowId)
+        : (m.nodeId ? ("Node: " + m.nodeId) : (m.roleId ? ("Role: " + m.roleId) : null));
+
+      let scopeBadgeHtml = "";
+      if (m.roleId) {
+        scopeBadgeHtml =
+          `<span class="inline-flex items-center gap-1 font-medium tracking-wide uppercase select-none bg-indigo-950/70 text-indigo-300 border border-indigo-800/70 font-mono px-2 py-0.5 text-xs rounded-full cursor-pointer hover:bg-indigo-900/80 transition-colors" onclick="event.stopPropagation(); filterMemoriesByRole('${
+            escapeHtml(m.roleId)
+          }')" title="Filter by role @${escapeHtml(m.roleId)}">@${escapeHtml(m.roleId)}</span>`;
+      } else if (scope === "role") {
+        scopeBadgeHtml =
+          `<span class="inline-flex items-center gap-1 font-medium tracking-wide uppercase select-none bg-indigo-950/70 text-indigo-300 border border-indigo-800/70 font-mono px-2 py-0.5 text-xs rounded-full">ROLE</span>`;
+      } else if (scope === "node") {
+        scopeBadgeHtml =
+          `<span class="inline-flex items-center gap-1 font-medium tracking-wide uppercase select-none bg-purple-950/60 text-purple-400 border border-purple-800/60 px-2 py-0.5 text-xs rounded-full">NODE</span>`;
+      } else {
+        scopeBadgeHtml =
+          `<span class="inline-flex items-center gap-1 font-medium tracking-wide uppercase select-none bg-sky-950/60 text-sky-400 border border-sky-800/60 px-2 py-0.5 text-xs rounded-full">WORKFLOW</span>`;
+      }
+
+      const sourceHtml = m.source
+        ? `
+        <span class="text-[10px] font-mono uppercase tracking-wider text-gray-500 bg-gray-800/80 px-1.5 py-0.5 rounded border border-gray-700/50">
+          ${escapeHtml(m.source)}
+        </span>
+      `
+        : "";
 
       const tagsHtml = (m.tags && Array.isArray(m.tags) && m.tags.length > 0)
-        ? m.tags.map((t) => '<span class="tag-chip">#' + escapeHtml(t) + "</span>").join("")
+        ? `<div class="flex flex-wrap gap-1">${
+          m.tags.map((t) => `
+            <span class="text-[11px] font-mono text-gray-400 bg-gray-800/70 border border-gray-700/60 px-1.5 py-0.5 rounded hover:text-gray-200 transition-colors">
+              #${escapeHtml(t)}
+            </span>
+          `).join("")
+        }</div>`
         : "";
 
       return `
-        <div class="memory-card" onclick="openMemoryDetailModal('${escapeHtml(m.id)}')">
-          <div class="memory-card-header">
-            <span class="badge ${scopeBadgeClass}">${
-        escapeHtml((m.scope || "workflow").toUpperCase())
-      }</span>
-            <span class="access-chip">👁️ ${m.accessCount || 0} recalls</span>
-          </div>
-          <div class="memory-key">${escapeHtml(m.key)}</div>
-          <div class="memory-summary">${escapeHtml(m.summary)}</div>
-          ${
-        targetRef ? '<div class="memory-target-ref">🎯 ' + escapeHtml(targetRef) + "</div>" : ""
+        <div
+          class="group relative flex flex-col justify-between gap-3 p-4 rounded-xl bg-gray-900/90 border border-gray-800 hover:border-gray-700 transition-all duration-150 shadow-sm hover:shadow-md cursor-pointer"
+          data-memory-id="${escapeHtml(m.id)}"
+          onclick="openMemoryDetailModal('${escapeHtml(m.id)}')"
+        >
+          <!-- Header: Key & Role/Scope Badges -->
+          <div class="flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-1.5 flex-wrap">
+                ${scopeBadgeHtml}
+                ${sourceHtml}
+              </div>
+
+              <span
+                class="inline-flex items-center gap-1 text-[11px] font-mono text-emerald-400 bg-emerald-950/50 border border-emerald-800/50 px-2 py-0.5 rounded-full"
+                title="Total recall count"
+              >
+                <span>👁️</span>
+                <span>${m.accessCount ?? 0}</span>
+              </span>
+            </div>
+
+            <!-- Memory Key -->
+            <h4
+              class="font-mono font-semibold text-sm text-sky-400 hover:text-sky-300 break-all cursor-pointer transition-colors"
+              title="${escapeHtml(m.key)}"
+            >
+              ${escapeHtml(m.key)}
+            </h4>
+
+            <!-- Short Summary -->
+            ${
+        m.summary
+          ? `
+              <p class="text-xs text-gray-300 line-clamp-2 leading-relaxed">
+                ${escapeHtml(m.summary)}
+              </p>
+            `
+          : ""
       }
-          ${tagsHtml ? '<div class="tags-row">' + tagsHtml + "</div>" : ""}
-          <div class="memory-card-footer">
-            <span>Updated: ${m.updatedAt ? new Date(m.updatedAt).toLocaleDateString() : "-"}</span>
-            <div style="display: flex; gap: 6px;">
-              <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); copyMemoryContent('${
-        escapeHtml(m.content || m.summary).replace(/'/g, "\\'")
-      }')" title="Copy Content">📋</button>
-              <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); openMemoryDetailModal('${
-        escapeHtml(m.id)
-      }')">Inspect</button>
-              <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteMemoryItem('${
-        escapeHtml(m.id)
-      }')">🗑️</button>
+
+            <!-- Target Reference -->
+            ${
+        targetRef
+          ? `
+              <div class="text-[11px] font-mono text-gray-500 flex items-center gap-1">
+                <span>🎯</span>
+                <span class="truncate">${escapeHtml(targetRef)}</span>
+              </div>
+            `
+          : ""
+      }
+          </div>
+
+          <!-- Content / Value Preview (with JSON formatting) -->
+          <div class="rounded-lg bg-gray-950 border border-gray-800/80 p-2.5 overflow-hidden">
+            <div class="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-gray-500 mb-1.5 pb-1 border-b border-gray-800/60">
+              <span>${preview.isJson ? "JSON Payload" : "Content Preview"}</span>
+              <span class="text-gray-600">${rawContent.length} chars</span>
+            </div>
+            ${
+        preview.isJson
+          ? `
+                <pre class="font-mono text-xs text-emerald-400 overflow-x-auto max-h-28 whitespace-pre scrollbar-thin scrollbar-thumb-gray-800">${
+            escapeHtml(preview.text)
+          }</pre>
+              `
+          : `
+                <p class="font-mono text-xs text-gray-300 whitespace-pre-wrap break-all line-clamp-4 max-h-28 overflow-y-auto">
+                  ${
+            preview.text
+              ? escapeHtml(preview.text)
+              : '<span class="text-gray-600 italic">(Empty memory content)</span>'
+          }
+                </p>
+              `
+      }
+          </div>
+
+          <!-- Tags Row -->
+          ${tagsHtml}
+
+          <!-- Footer: Timestamp & Action Buttons -->
+          <div class="flex items-center justify-between pt-2.5 border-t border-gray-800/80 gap-2">
+            <span
+              class="text-[11px] text-gray-500 truncate"
+              title="Updated at ${escapeHtml(m.updatedAt || m.createdAt || "unknown")}"
+            >
+              🕒 ${escapeHtml(timeLabel)}
+            </span>
+
+            <div class="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                class="inline-flex items-center justify-center gap-1 transition-colors duration-150 focus:outline-none select-none bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-200 font-medium border border-gray-600 px-2.5 py-1 text-xs rounded shadow-sm"
+                onclick="event.stopPropagation(); copyMemoryContent('${
+        escapeHtml(rawContent).replace(/'/g, "\\'")
+      }')"
+                title="Copy memory content to clipboard"
+                data-action="copy"
+              >
+                <span>📋</span>
+                <span>Copy</span>
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center justify-center gap-1 transition-colors duration-150 focus:outline-none select-none bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-200 font-medium border border-gray-600 px-2.5 py-1 text-xs rounded shadow-sm"
+                onclick="event.stopPropagation(); openMemoryDetailModal('${escapeHtml(m.id)}')"
+                title="Inspect memory details"
+                data-action="inspect"
+              >
+                <span>🔍</span>
+                <span>Inspect</span>
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center justify-center transition-colors duration-150 focus:outline-none select-none bg-red-600 hover:bg-red-700 active:bg-red-800 text-white font-medium border border-transparent px-2.5 py-1 text-xs rounded shadow-sm"
+                onclick="event.stopPropagation(); deleteMemoryItem('${escapeHtml(m.id)}')"
+                title="Delete this memory"
+                data-action="delete"
+              >
+                <span>🗑️</span>
+              </button>
             </div>
           </div>
         </div>
       `;
     }).join("");
+
+    grid.innerHTML =
+      `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${cardsHtml}</div>`;
   }
 
   /**
@@ -1257,6 +1615,15 @@
    * Fetch all roles with active journal entries.
    */
   async function loadJournals(showNotification = false) {
+    const grid = document.getElementById("rolesGrid");
+    if (grid && allRoles.length === 0) {
+      grid.innerHTML = `
+        <div class="flex flex-col items-center justify-center p-12 text-center text-gray-400 gap-3">
+          <div class="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
+          <p class="text-sm font-medium">Loading Role Journal entries...</p>
+        </div>
+      `;
+    }
     try {
       const res = await fetch("/api/roles");
       if (!res.ok) throw new Error("Failed to load roles");
@@ -1268,6 +1635,17 @@
       if (showNotification) showToast("Role Journals refreshed");
     } catch (err) {
       showToast(err.message, true);
+      if (grid && allRoles.length === 0) {
+        grid.innerHTML = `
+          <div class="flex flex-col items-center justify-center p-12 text-center text-rose-400 gap-3 bg-gray-900/40 rounded-xl border border-rose-900/30">
+            <span class="text-3xl">⚠️</span>
+            <p class="text-sm font-medium">Failed to load role journals: ${
+          escapeHtml(err.message)
+        }</p>
+            <button type="button" class="btn btn-sm btn-secondary px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs mt-2" onclick="loadJournals(true)">Retry</button>
+          </div>
+        `;
+      }
     }
   }
 
@@ -1283,70 +1661,206 @@
   function renderJournalsGrid() {
     const grid = document.getElementById("rolesGrid");
     if (!grid) return;
-    const searchEl = document.getElementById("journalSearchInput");
+    const searchEl = document.getElementById("journal-search-input") ||
+      document.getElementById("journalSearchInput");
     const search = (searchEl ? searchEl.value : "").toLowerCase().trim();
 
     const filtered = allRoles.filter((r) => {
+      if (activeJournalRoleTab && activeJournalRoleTab !== "all" && activeJournalRoleTab !== "") {
+        if ((r.name || "").toLowerCase() !== activeJournalRoleTab.toLowerCase()) {
+          return false;
+        }
+      }
+
       if (!search) return true;
       const matchName = (r.name || "").toLowerCase().includes(search);
       const matchDesc = (r.description || "").toLowerCase().includes(search);
       const matchJournal = r.journal && (r.journal.entry || "").toLowerCase().includes(search);
-      return matchName || matchDesc || matchJournal;
+      const matchAuthor = r.journal && (r.journal.writtenBy || "").toLowerCase().includes(search);
+      const matchTags = r.journal && r.journal.tags && Array.isArray(r.journal.tags) &&
+        r.journal.tags.some((t) => t.toLowerCase().includes(search));
+      return matchName || matchDesc || matchJournal || matchAuthor || matchTags;
     });
 
     if (filtered.length === 0) {
-      grid.innerHTML =
-        '<div class="empty-state">No roles found. Click "+ New Role" to create one.</div>';
+      const isFiltered = Boolean(
+        (document.getElementById("journal-search-input") ||
+          document.getElementById("journalSearchInput"))?.value ||
+          (activeJournalRoleTab && activeJournalRoleTab !== "all"),
+      );
+      grid.innerHTML = `
+        <div class="flex flex-col items-center justify-center p-12 text-center text-gray-400 gap-3 bg-gray-900/40 rounded-xl border border-gray-800">
+          <span class="text-3xl">${isFiltered ? "🔍" : "📖"}</span>
+          <h3 class="text-base font-semibold text-gray-200">${
+        isFiltered ? "No matching journal entries" : "No role journals found"
+      }</h3>
+          <p class="text-sm text-gray-400 max-w-md">${
+        isFiltered
+          ? "No journal entries match your selected role or search query. Try clearing filters or selecting another role tab."
+          : "No engineering roles or journal entries have been recorded yet. Click '+ New Role' to create one."
+      }</p>
+          <div class="flex items-center gap-2 mt-2">
+            <button type="button" class="btn btn-sm btn-secondary px-3 py-1.5 text-xs font-medium rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200" onclick="openNewRoleModal()">
+              <span>➕</span>
+              <span>New Role</span>
+            </button>
+          </div>
+        </div>
+      `;
       return;
     }
 
-    grid.innerHTML = filtered.map((r) => {
-      const hasJournal = r.journal && r.journal.entry;
-      const journalHtml = hasJournal
-        ? `
-        <div class="journal-box">
-          <div class="journal-box-header">
-            <span>👤 <strong>${escapeHtml(r.journal.writtenBy || "unknown")}</strong></span>
-            <span>🕒 ${new Date(r.journal.updatedAt).toLocaleString()}</span>
-          </div>
-          <div class="journal-entry-text">${escapeHtml(r.journal.entry)}</div>
-        </div>
-      `
-        : `
-        <div class="journal-box" style="text-align: center; color: var(--text-dim); padding: 20px 10px;">
-          No journal snapshot recorded yet for this role.
-        </div>
-      `;
+    const cardsHtml = filtered.map((r) => {
+      const hasJournal = Boolean(r.journal && r.journal.entry);
+      const colors = getRoleColor(r.name);
+      const initial = (r.name || "R").trim().charAt(0).toUpperCase() || "R";
+      const isoTime = hasJournal
+        ? (r.journal.updatedAt || r.journal.createdAt || r.journal.timestamp)
+        : null;
+      const formattedTime = isoTime ? formatTimestamp(isoTime) : null;
+      const journalEntryText = hasJournal ? r.journal.entry : "";
+
+      const tagsHtml =
+        (hasJournal && r.journal.tags && Array.isArray(r.journal.tags) && r.journal.tags.length > 0)
+          ? `<div class="flex flex-wrap items-center gap-1.5 pt-1">
+            <span class="text-[10px] uppercase font-semibold text-gray-500 tracking-wider">Tags:</span>
+            ${
+            r.journal.tags.map((tag) => `
+              <span class="text-[11px] font-mono text-gray-400 bg-gray-800/70 border border-gray-700/60 px-2 py-0.5 rounded-full hover:text-gray-200 transition-colors">
+                #${escapeHtml(tag)}
+              </span>
+            `).join("")
+          }
+          </div>`
+          : "";
 
       return `
-        <div class="role-card">
-          <div class="role-card-header">
-            <div class="role-name">
-              <span>🏷️</span>
-              <span>${escapeHtml(r.name)}</span>
+        <div
+          class="group relative flex flex-col gap-3 p-5 rounded-xl bg-gray-900/90 border border-gray-800 hover:border-gray-700 transition-all duration-150 shadow-sm hover:shadow-md"
+          data-role="${escapeHtml(r.name)}"
+        >
+          <!-- Header: Role Avatar, Role Badge, Author, & Formatted Timestamp -->
+          <div class="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
+            <div class="flex items-center gap-3">
+              <!-- Role Avatar -->
+              <div
+                class="w-9 h-9 rounded-lg flex items-center justify-center font-mono font-bold text-sm border ${colors.bg} ${colors.text} ${colors.border} shadow-sm shrink-0"
+                title="Role: ${escapeHtml(r.name)}"
+              >
+                ${escapeHtml(initial)}
+              </div>
+
+              <div class="flex flex-col gap-0.5">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span
+                    class="inline-flex items-center gap-1 font-medium tracking-wide uppercase select-none bg-indigo-950/70 text-indigo-300 border border-indigo-800/70 font-mono px-2 py-0.5 text-xs rounded-full cursor-pointer hover:bg-indigo-900/80 transition-colors"
+                    onclick="filterJournalsByRole('${escapeHtml(r.name)}')"
+                    title="Filter journals by @${escapeHtml(r.name)}"
+                  >
+                    @${escapeHtml(r.name)}
+                  </span>
+                  ${
+        hasJournal && r.journal.writtenBy
+          ? `
+                    <span class="text-xs text-gray-400 flex items-center gap-1">
+                      <span>by</span>
+                      <span class="text-gray-200 font-medium font-mono">${
+            escapeHtml(r.journal.writtenBy)
+          }</span>
+                    </span>
+                  `
+          : ""
+      }
+                </div>
+
+                ${
+        isoTime
+          ? `
+                  <time
+                    datetime="${escapeHtml(isoTime)}"
+                    title="${escapeHtml(isoTime)}"
+                    class="text-[11px] font-mono text-gray-500 flex items-center gap-1"
+                  >
+                    <span>🕒</span>
+                    <span>${escapeHtml(formattedTime)}</span>
+                  </time>
+                `
+          : ""
+      }
+              </div>
             </div>
-            <span class="badge badge-epic">ROLE</span>
+
+            <!-- Action Controls -->
+            <div class="flex items-center gap-1.5 self-start sm:self-center shrink-0 flex-wrap">
+              ${
+        hasJournal
+          ? `
+                <button
+                  type="button"
+                  class="inline-flex items-center justify-center gap-1 transition-colors duration-150 focus:outline-none select-none bg-transparent hover:bg-gray-800 active:bg-gray-700 text-gray-400 hover:text-gray-200 font-medium border border-transparent px-2.5 py-1 text-xs rounded"
+                  onclick="copyMemoryContent('${
+            escapeHtml(journalEntryText).replace(/'/g, "\\'")
+          }')"
+                  title="Copy journal entry content"
+                >
+                  <span>📋</span>
+                  <span class="hidden sm:inline">Copy</span>
+                </button>
+              `
+          : ""
+      }
+
+              <button
+                type="button"
+                class="inline-flex items-center justify-center gap-1 transition-colors duration-150 focus:outline-none select-none bg-transparent hover:bg-gray-800 active:bg-gray-700 text-gray-400 hover:text-gray-200 font-medium border border-transparent px-2.5 py-1 text-xs rounded"
+                onclick="openEditJournalModal('${escapeHtml(r.name)}', '${
+        hasJournal ? escapeHtml(journalEntryText).replace(/'/g, "\\'") : ""
+      }')"
+                title="${hasJournal ? "Edit journal entry" : "Write journal entry"}"
+              >
+                <span>${hasJournal ? "✏️" : "📝"}</span>
+                <span class="hidden sm:inline">${hasJournal ? "Edit" : "Write"}</span>
+              </button>
+
+              <button
+                type="button"
+                class="inline-flex items-center justify-center gap-1 transition-colors duration-150 focus:outline-none select-none bg-gray-800 hover:bg-gray-700 active:bg-gray-600 text-gray-200 font-medium border border-gray-600 px-2.5 py-1 text-xs rounded shadow-sm"
+                onclick="viewRoleTasks('${escapeHtml(r.name)}')"
+                title="View tasks assigned to this role"
+              >
+                <span>📋</span>
+                <span>Tasks</span>
+              </button>
+            </div>
           </div>
 
-          ${r.description ? '<div class="role-desc">' + escapeHtml(r.description) + "</div>" : ""}
+          <!-- Role Description (if provided) -->
+          ${
+        r.description
+          ? `
+            <p class="text-xs text-gray-400 italic">
+              ${escapeHtml(r.description)}
+            </p>
+          `
+          : ""
+      }
 
-          ${journalHtml}
-
-          <div class="role-card-actions">
-            <button class="btn btn-secondary btn-sm" onclick="viewRoleTasks('${
-        escapeHtml(r.name)
-      }')">
-              📋 View Role Tasks
-            </button>
-            <button class="btn btn-sm" onclick="openEditJournalModal('${escapeHtml(r.name)}', '${
-        hasJournal ? escapeHtml(r.journal.entry).replace(/'/g, "\\'") : ""
-      }')">
-              ${hasJournal ? "✏️ Update Journal" : "📝 Write Journal"}
-            </button>
+          <!-- Markdown / Text Body -->
+          <div class="rounded-lg bg-gray-950/80 border border-gray-800/80 p-4 text-sm text-gray-200 font-sans leading-relaxed whitespace-pre-wrap break-words overflow-x-auto">
+            ${
+        hasJournal
+          ? escapeHtml(journalEntryText)
+          : '<span class="text-gray-600 italic">No journal snapshot recorded yet for this role.</span>'
+      }
           </div>
+
+          <!-- Tags Row (if provided) -->
+          ${tagsHtml}
         </div>
       `;
     }).join("");
+
+    grid.innerHTML = `<div class="flex flex-col gap-4">${cardsHtml}</div>`;
   }
 
   function viewRoleTasks(roleName) {
@@ -1508,6 +2022,43 @@
       }
     });
 
+    // Memory Vault search & filters listeners
+    const memSearch = document.getElementById("memory-search-input") ||
+      document.getElementById("memSearchInput");
+    if (memSearch) {
+      memSearch.addEventListener("input", () => renderMemoriesGrid());
+    }
+    const memRole = document.getElementById("memory-role-select");
+    if (memRole) {
+      memRole.addEventListener("change", () => renderMemoriesGrid());
+    }
+    const memScope = document.getElementById("memory-scope-select") ||
+      document.getElementById("memScopeFilter");
+    if (memScope) {
+      memScope.addEventListener("change", () => renderMemoriesGrid());
+    }
+
+    // Role Journals search & role tabs delegation
+    const journalSearch = document.getElementById("journal-search-input") ||
+      document.getElementById("journalSearchInput");
+    if (journalSearch) {
+      journalSearch.addEventListener("input", () => renderJournalsGrid());
+    }
+    const journalNav = document.querySelector('nav[aria-label="Role Journal Tabs"]');
+    if (journalNav) {
+      journalNav.addEventListener("click", (e) => {
+        const btn = e.target.closest("button");
+        if (!btn) return;
+        const tabId = btn.getAttribute("data-tab-id") ||
+          (btn.textContent.includes("All Roles")
+            ? "all"
+            : btn.textContent.trim().replace(/^@/, "").split(/\s+/)[0]);
+        if (tabId) {
+          filterJournalsByRole(tabId);
+        }
+      });
+    }
+
     // Initial view load
     if (currentTab === "memories") {
       loadMemories();
@@ -1572,6 +2123,11 @@
   globalThis.openEditJournalModal = openEditJournalModal;
   globalThis.closeEditJournalModal = closeEditJournalModal;
   globalThis.submitJournalUpdate = submitJournalUpdate;
+  globalThis.formatValuePreview = formatValuePreview;
+  globalThis.formatTimestamp = formatTimestamp;
+  globalThis.getRoleColor = getRoleColor;
+  globalThis.filterMemoriesByRole = filterMemoriesByRole;
+  globalThis.filterJournalsByRole = filterJournalsByRole;
   globalThis.initTaskApp = initTaskApp;
 
   // Auto-initialize when DOM is ready

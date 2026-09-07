@@ -197,7 +197,7 @@ export function KanbanBoard({
   };
 
   return (
-    <div class={`main-view flex flex-col flex-1 min-h-0 ${customClass}`.trim()}>
+    <div class={`kanban-board-container flex flex-col flex-1 min-h-0 ${customClass}`.trim()}>
       {/* Controls & Metrics Bar */}
       {showControls && (
         <div class="controls-bar flex flex-col gap-3 p-4 bg-gray-950 border-b border-gray-800 select-none">

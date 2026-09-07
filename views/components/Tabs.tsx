@@ -93,6 +93,7 @@ export function Tabs({
             onClick={() => onTabChange?.(tab.id)}
             class={`${baseClasses} ${stateClasses}`}
             aria-current={isActive ? "true" : undefined}
+            data-tab-id={tab.id}
           >
             {content}
           </button>

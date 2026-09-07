@@ -1,11 +1,13 @@
 import type { VNode } from "preact";
 import { KanbanBoard } from "./KanbanBoard.tsx";
-import type { TaskCardItem } from "./TaskCard.tsx";
+import { TaskCard, type TaskCardItem } from "./TaskCard.tsx";
 import { TaskModal } from "./TaskModal.tsx";
 import type { TaskModalItem, TaskModalMode } from "./TaskModal.tsx";
 import { MemoryVault } from "../memory/MemoryVault.tsx";
+import { MemoryCard } from "../memory/MemoryCard.tsx";
 import type { MemoryCardItem, MemoryMetrics } from "../memory/MemoryVault.tsx";
 import { JournalView } from "../journal/JournalView.tsx";
+import { JournalEntryCard } from "../journal/JournalEntryCard.tsx";
 import type { JournalEntry, RoleItem } from "../journal/JournalView.tsx";
 
 // Helper to emit raw event handler attributes in SSR without TypeScript JSX type errors
@@ -186,6 +188,7 @@ export function TaskApp({
               <a
                 href="/tasks"
                 class="text-lg font-bold text-gray-100 hover:text-blue-400 transition-colors"
+                {...rawAttr({ onclick: "switchMainTab('tasks', event)" })}
               >
                 Workflow Tasks
               </a>
@@ -312,6 +315,45 @@ export function TaskApp({
         mode="create"
         currentUser={safeUserName}
       />
+
+      {/* Hidden SSR style anchors to ensure Twind extracts card styles for client-rendered cards */}
+      <div class="hidden" aria-hidden="true">
+        <TaskCard
+          task={{
+            id: "tk-anchor",
+            title: "Anchor",
+            status: "open",
+            priority: "high",
+            type: "task",
+            role: "developer",
+            assignee: "user",
+            comments: 1,
+            isReady: true,
+          }}
+        />
+        <MemoryCard
+          memory={{
+            id: "mem-anchor",
+            key: "key-anchor",
+            summary: "Summary anchor",
+            content: "Content anchor",
+            scope: "role",
+            roleId: "developer",
+            tags: ["tag"],
+            accessCount: 1,
+          }}
+        />
+        <JournalEntryCard
+          entry={{
+            id: "role-anchor",
+            role: "developer",
+            entry: "Journal anchor text",
+            writtenBy: "Dev",
+            updatedAt: new Date().toISOString(),
+            tags: ["tag"],
+          }}
+        />
+      </div>
 
       {/* Memory Detail & Recall Modal */}
       <div

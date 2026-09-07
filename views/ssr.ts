@@ -5,10 +5,11 @@ import { h } from "preact";
 import { renderToString } from "preact-render-to-string";
 import { BaseLayout } from "./layouts/BaseLayout.tsx";
 
-// Initialize Twind with autoprefix and tailwind presets in class dark mode
+// Initialize Twind with autoprefix and tailwind presets in class dark mode (no hash for client CSS compatibility)
 install({
   presets: [presetAutoprefix(), presetTailwind()],
   darkMode: "class",
+  hash: false,
 });
 
 export interface RenderHtmlOptions {
