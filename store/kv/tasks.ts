@@ -470,44 +470,54 @@ export async function listTasks(
   } else {
     for await (const entry of kv.list<Task>({ prefix: ["users", uid, "tasks"] })) {
       if (entry.value && typeof entry.value === "object") {
-        candidateTasks.push({
+        const taskObj = {
           ...entry.value,
           comments: entry.value.comments ?? [],
-        });
+        };
+
+        if (taskMatchesFilters(taskObj, filters)) {
+          candidateTasks.push(taskObj);
+          if (filters?.limit && candidateTasks.length >= filters.limit) {
+            break;
+          }
+        }
       }
     }
+    return candidateTasks;
   }
 
   // In-memory filter for remaining fields
-  let filtered = candidateTasks.filter((t) => {
-    if (filters?.workflowId && t.workflowId !== filters.workflowId) return false;
-    if (filters?.executionId && t.executionId !== filters.executionId) return false;
-    if (filters?.nodeId && t.nodeId !== filters.nodeId) return false;
-    if (filters?.assignee && t.assignee !== filters.assignee) return false;
-    if (filters?.role && t.role !== filters.role) return false;
-    if (filters?.parentTaskId && t.parentTaskId !== filters.parentTaskId) return false;
-    if (filters?.type) {
-      if (Array.isArray(filters.type)) {
-        if (!t.type || !filters.type.includes(t.type)) return false;
-      } else {
-        if (t.type !== filters.type) return false;
-      }
-    }
-    if (filters?.status) {
-      if (Array.isArray(filters.status)) {
-        if (!filters.status.includes(t.status)) return false;
-      } else {
-        if (t.status !== filters.status) return false;
-      }
-    }
-    return true;
-  });
+  let filtered = candidateTasks.filter((t) => taskMatchesFilters(t, filters));
 
   if (filters?.limit && filters.limit > 0) {
     filtered = filtered.slice(0, filters.limit);
   }
 
   return filtered;
+}
+
+function taskMatchesFilters(t: Task, filters?: TaskFilters): boolean {
+  if (filters?.workflowId && t.workflowId !== filters.workflowId) return false;
+  if (filters?.executionId && t.executionId !== filters.executionId) return false;
+  if (filters?.nodeId && t.nodeId !== filters.nodeId) return false;
+  if (filters?.assignee && t.assignee !== filters.assignee) return false;
+  if (filters?.role && t.role !== filters.role) return false;
+  if (filters?.parentTaskId && t.parentTaskId !== filters.parentTaskId) return false;
+  if (filters?.type) {
+    if (Array.isArray(filters.type)) {
+      if (!t.type || !filters.type.includes(t.type)) return false;
+    } else {
+      if (t.type !== filters.type) return false;
+    }
+  }
+  if (filters?.status) {
+    if (Array.isArray(filters.status)) {
+      if (!filters.status.includes(t.status)) return false;
+    } else {
+      if (t.status !== filters.status) return false;
+    }
+  }
+  return true;
 }
 
 /** Helper to fetch multiple tasks by IDs using getMany chunks. */
