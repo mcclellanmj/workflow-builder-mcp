@@ -29,60 +29,76 @@ export function listWorkflows(options?: ListOptions): Promise<Workflow[]> {
 export async function deleteWorkflow(id: WorkflowId, userId?: string): Promise<void> {
   const uid = resolveUserId(userId);
   const kv = await getKv();
+
+  const commitPromises: Promise<Deno.KvCommitResult | Deno.KvCommitError>[] = [];
   let atomic = kv.atomic();
   let opCount = 0;
 
-  const commitBatch = async (): Promise<void> => {
-    if (opCount > 0) {
-      await atomic.commit();
+  const queueDelete = (key: Deno.KvKey) => {
+    atomic.delete(key);
+    opCount++;
+    if (opCount >= MAX_ATOMIC_OPS) {
+      commitPromises.push(
+        atomic.commit().catch((e) => {
+          throw e;
+        }),
+      );
       atomic = kv.atomic();
       opCount = 0;
     }
   };
 
-  // Delete all nodes belonging to this workflow (and any subworkflow index refs)
-  for await (const entry of kv.list<WorkflowNode>({ prefix: ["users", uid, "nodes", id] })) {
-    atomic.delete(entry.key);
-    opCount++;
-    if (
-      entry.value?.type === "subworkflow" && typeof entry.value.config?.childWorkflowId === "string"
+  const batchSize = 500;
+
+  const processNodes = async () => {
+    for await (
+      const entry of kv.list<WorkflowNode>({ prefix: ["users", uid, "nodes", id] }, { batchSize })
     ) {
-      const childId = (entry.value.config.childWorkflowId as string).trim();
-      if (childId) {
-        atomic.delete(["users", uid, "subworkflow_refs", childId, id, entry.value.id]);
-        opCount++;
+      queueDelete(entry.key);
+      if (
+        entry.value?.type === "subworkflow" &&
+        typeof entry.value.config?.childWorkflowId === "string"
+      ) {
+        const childId = (entry.value.config.childWorkflowId as string).trim();
+        if (childId) {
+          queueDelete(["users", uid, "subworkflow_refs", childId, id, entry.value.id]);
+        }
       }
     }
-    if (opCount >= MAX_ATOMIC_OPS) {
-      await commitBatch();
-    }
-  }
+  };
 
-  // Delete all edges belonging to this workflow
-  for await (const entry of kv.list({ prefix: ["users", uid, "edges", id] })) {
-    atomic.delete(entry.key);
-    opCount++;
-    if (opCount >= MAX_ATOMIC_OPS) {
-      await commitBatch();
+  const processEdges = async () => {
+    for await (const entry of kv.list({ prefix: ["users", uid, "edges", id] }, { batchSize })) {
+      queueDelete(entry.key);
     }
-  }
+  };
 
-  // Delete all executions belonging to this workflow (via the by-workflow index)
-  for await (
-    const entry of kv.list<string>({ prefix: ["users", uid, "executions_by_workflow", id] })
-  ) {
-    const executionId = entry.value;
-    atomic.delete(["users", uid, "executions", executionId]);
-    atomic.delete(entry.key);
-    opCount += 2;
-    if (opCount >= MAX_ATOMIC_OPS) {
-      await commitBatch();
+  const processExecutions = async () => {
+    for await (
+      const entry of kv.list<string>({ prefix: ["users", uid, "executions_by_workflow", id] }, {
+        batchSize,
+      })
+    ) {
+      const executionId = entry.value;
+      queueDelete(["users", uid, "executions", executionId]);
+      queueDelete(entry.key);
     }
-  }
+  };
+
+  // Process list operations concurrently to maximize read throughput
+  await Promise.all([processNodes(), processEdges(), processExecutions()]);
 
   // Delete the workflow itself
-  atomic.delete(["users", uid, "workflows", id]);
-  opCount++;
-  await commitBatch();
+  queueDelete(["users", uid, "workflows", id]);
+
+  if (opCount > 0) {
+    commitPromises.push(
+      atomic.commit().catch((e) => {
+        throw e;
+      }),
+    );
+  }
+
+  await Promise.all(commitPromises);
   invalidateWorkflowCache(uid);
 }
