@@ -149,9 +149,27 @@ export async function saveMemory(
         updatedAt: now,
       };
 
-      const atomic = kv.atomic()
+      let atomic = kv.atomic()
         .set(["users", uid, "memories", updated.id], updated)
         .set(["users", uid, "memories_by_scope", updated.scope, updated.id], updated.id);
+
+      const oldTags = existingEntry.value.tags || [];
+      const newTags = updated.tags || [];
+
+      // Tags to remove
+      for (const t of oldTags) {
+        if (!newTags.includes(t)) {
+          atomic = atomic.delete(["users", uid, "memories_by_tag", t, updated.id]);
+        }
+      }
+
+      // Tags to add
+      for (const t of newTags) {
+        if (!oldTags.includes(t)) {
+          atomic = atomic.set(["users", uid, "memories_by_tag", t, updated.id], updated.id);
+        }
+      }
+
       const res = await atomic.commit();
       if (!res.ok) {
         throw new Error(`Failed to update memory with key "${trimmedKey}"`);
@@ -184,6 +202,12 @@ export async function saveMemory(
     .set(["users", uid, "memories", id], memory)
     .set(["users", uid, "memory_keys", scope, scopeRef, trimmedKey], id)
     .set(["users", uid, "memories_by_scope", memory.scope, id], id);
+
+  if (memory.tags && memory.tags.length > 0) {
+    for (const tag of memory.tags) {
+      atomic.set(["users", uid, "memories_by_tag", tag, id], id);
+    }
+  }
 
   if (scope === "workflow" && memory.workflowId) {
     atomic.set(["users", uid, "memories_by_workflow", memory.workflowId, id], id);
@@ -263,6 +287,17 @@ export async function listMemories(
     for await (
       const entry of kv.list<string>({
         prefix: ["users", uid, "memories_by_scope", filters.scope],
+      })
+    ) {
+      if (entry.value) ids.push(entry.value);
+    }
+    candidateIds = ids;
+  } else if (filters?.tags && filters.tags.length > 0) {
+    const ids: string[] = [];
+    const firstTag = filters.tags[0];
+    for await (
+      const entry of kv.list<string>({
+        prefix: ["users", uid, "memories_by_tag", firstTag],
       })
     ) {
       if (entry.value) ids.push(entry.value);
@@ -555,6 +590,17 @@ export async function deleteMemory(
   } else if (memory.scope === "role" && memory.roleId) {
     atomic.delete(["users", uid, "memories_by_role", memory.roleId, memory.id]);
     opCount++;
+  }
+
+  // Delete tag indexes
+  if (memory.tags && memory.tags.length > 0) {
+    for (const tag of memory.tags) {
+      atomic.delete(["users", uid, "memories_by_tag", tag, memory.id]);
+      opCount++;
+      if (opCount >= MAX_ATOMIC_OPS) {
+        await commitBatch();
+      }
+    }
   }
 
   // 4. Delete all access logs
