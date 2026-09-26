@@ -68,7 +68,7 @@ export function DashboardApp({
             </div>
           </div>
 
-          {/* Navigation Links to /tasks, /visualize, /memories, /journals */}
+          {/* Navigation Links to /tasks, /visualize, /memories, /roles */}
           <nav class="flex items-center gap-2" aria-label="Main Navigation">
             <a
               href="/"
@@ -256,7 +256,7 @@ export function DashboardApp({
                 <span class="text-xs text-gray-500">GET /roles</span>
               </div>
               <p class="text-xs text-gray-400">
-                Persistent engineering roles, job descriptions, handoffs, and logs.
+                Persistent engineering roles, job descriptions, handoffs, and workflows.
               </p>
             </a>
 

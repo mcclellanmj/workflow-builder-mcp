@@ -27,6 +27,7 @@ export function generateSsrVisualizerHtml(options: SsrVisualizerOptions): string
     exportedAt: bundle.exportedAt,
     workflows: allWorkflows,
     ticket: viewTicket ? { ticketId: viewTicket.ticketId, expiresAt: viewTicket.expiresAt } : null,
+    messages: options.messages || [],
   }).replace(/<\/script>/gi, "<\\/script>");
 
   const expiresTimestamp = viewTicket ? viewTicket.expiresAt : null;
@@ -68,6 +69,7 @@ export function generateSsrVisualizerHtml(options: SsrVisualizerOptions): string
         <option value="all">Status: All</option>
         <option value="completed">Status: Completed ✅</option>
         <option value="running">Status: Running 🔄</option>
+        <option value="waiting_for_children">Status: Waiting for Children ⏸️</option>
         <option value="pending">Status: Pending ⏳</option>
         <option value="failed">Status: Failed ❌</option>
         <option value="skipped">Status: Skipped ⏭️</option>
@@ -77,6 +79,9 @@ export function generateSsrVisualizerHtml(options: SsrVisualizerOptions): string
       </button>
       <button id="auto-refresh-btn" class="btn" title="Toggle live auto-refresh">
         Live: <span id="refresh-state-label" style="color: #6ee7b7;">ON</span>
+      </button>
+      <button id="msg-board-btn" class="btn" title="Toggle Message Board">
+        💬 Messages <span id="header-msg-count" class="badge" style="background: var(--bg-panel-subtle); color: var(--accent); margin-left: 2px;">${(options.messages || []).length}</span>
       </button>
       <button id="fit-btn" class="btn btn-primary" title="Fit to Viewport">Fit Canvas</button>
     </div>
@@ -93,73 +98,107 @@ export function generateSsrVisualizerHtml(options: SsrVisualizerOptions): string
       </div>
     </div>
 
-    <!-- Node Inspector Drawer -->
+    <!-- Node Inspector Drawer & Message Board -->
     <div id="inspector" class="hidden">
-      <div class="inspector-header">
-        <div class="inspector-title-wrap">
-          <div class="inspector-node-name" id="insp-name">Node Name</div>
-          <div style="display: flex; gap: 6px; align-items: center; margin-top: 4px;">
-            <span id="insp-type-badge" class="badge" style="background: var(--bg-panel-subtle); color: var(--accent);">step</span>
-            <span id="insp-status-badge" class="badge badge-status-pending">pending</span>
-            <span id="insp-subagent-badge" class="badge" style="display: none; background: #312e81; color: #a5b4fc; border: 1px solid #4338ca;">⚡ Sub-Agent</span>
-          </div>
-        </div>
-        <button id="close-inspector-btn" class="btn" style="padding: 4px 8px;">✕</button>
+      <div class="panel-tabs">
+        <button id="tab-btn-inspector" class="panel-tab-btn active">🔍 Inspector</button>
+        <button id="tab-btn-messages" class="panel-tab-btn">💬 Message Board (<span id="tab-msg-count">${(options.messages || []).length}</span>)</button>
+        <button id="close-inspector-btn" class="btn" style="margin-left: auto; padding: 4px 8px;">✕</button>
       </div>
 
-      <div class="inspector-body">
-        <div id="insp-subworkflow-action" style="display: none;">
-          <button id="insp-drilldown-btn" class="drilldown-btn">
-            📦 Drill Down into Subworkflow
-          </button>
-        </div>
-
-        <div class="section-card">
-          <div class="section-title">
-            <span>📝 Prompt / Instruction</span>
-            <button id="copy-prompt-btn" class="btn" style="padding: 2px 6px; font-size: 0.72rem;">Copy</button>
-          </div>
-          <div class="prompt-content" id="insp-prompt">No prompt available</div>
-        </div>
-
-        <div class="section-card" id="insp-config-card">
-          <div class="section-title">
-            <span>⚙️ Configuration</span>
-          </div>
-          <div id="insp-config-details" style="font-size: 0.85rem; color: #cbd5e1; display: flex; flex-direction: column; gap: 6px;"></div>
-        </div>
-
-        <div class="section-card" id="insp-execution-card">
-          <div class="section-title">
-            <span>⚡ Execution Status</span>
-            <span id="insp-iter-count" style="color: var(--accent); font-size: 0.75rem;"></span>
-          </div>
-          
-          <div id="insp-error-wrap" style="display: none;">
-            <div style="font-size: 0.75rem; color: #f87171; font-weight: 600; margin-bottom: 4px;">Error:</div>
-            <div class="error-content" id="insp-error"></div>
-          </div>
-
-          <div id="insp-history-wrap" style="display: none; margin-top: 8px;">
-            <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Past Iteration History</div>
-            <div id="insp-history-list" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;"></div>
+      <!-- Inspector Tab Content -->
+      <div id="tab-content-inspector" class="tab-pane active">
+        <div class="inspector-header">
+          <div class="inspector-title-wrap">
+            <div class="inspector-node-name" id="insp-name">Node Name</div>
+            <div style="display: flex; gap: 6px; align-items: center; margin-top: 4px; flex-wrap: wrap;">
+              <span id="insp-type-badge" class="badge" style="background: var(--bg-panel-subtle); color: var(--accent);">step</span>
+              <span id="insp-status-badge" class="badge badge-status-pending">pending</span>
+              <span id="insp-barrier-badge" class="badge badge-barrier" style="display: none;">🛡️ Barrier</span>
+              <span id="insp-subagent-badge" class="badge" style="display: none; background: #312e81; color: #a5b4fc; border: 1px solid #4338ca;">⚡ Sub-Agent</span>
+              <span id="insp-subworkflow-badge" class="badge badge-subworkflow" style="display: none;">📦 Subworkflow</span>
+            </div>
           </div>
         </div>
 
-        <div class="section-card">
-          <div class="section-title">
-            <span>ℹ️ Node Metadata</span>
+        <div class="inspector-body">
+          <div id="insp-subworkflow-action" style="display: none;">
+            <button id="insp-drilldown-btn" class="drilldown-btn">
+              📦 Drill Down into Subworkflow
+            </button>
           </div>
-          <div style="font-size: 0.8rem; color: var(--text-muted); display: grid; grid-template-columns: 90px 1fr; gap: 6px;">
-            <div>Node ID:</div>
-            <div style="font-family: monospace; color: #e2e8f0;" id="insp-node-id"></div>
-            <div>Workflow ID:</div>
-            <div style="font-family: monospace; color: #e2e8f0;" id="insp-wf-id"></div>
-            <div>Updated:</div>
-            <div id="insp-updated-at"></div>
+
+          <!-- Decision Rules Card -->
+          <div class="section-card" id="insp-decision-rules-card" style="display: none; border-color: #d97706;">
+            <div class="section-title" style="color: #fbbf24;">
+              <span>⚖️ Decision Rules &amp; Maps</span>
+              <span id="insp-decision-field" style="font-family: monospace; font-size: 0.75rem; color: #94a3b8;"></span>
+            </div>
+            <div id="insp-decision-rules-content" style="font-size: 0.82rem; display: flex; flex-direction: column; gap: 6px;"></div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title">
+              <span>📝 Prompt / Instruction</span>
+              <button id="copy-prompt-btn" class="btn" style="padding: 2px 6px; font-size: 0.72rem;">Copy</button>
+            </div>
+            <div class="prompt-content" id="insp-prompt">No prompt available</div>
+          </div>
+
+          <div class="section-card" id="insp-config-card">
+            <div class="section-title">
+              <span>⚙️ Configuration</span>
+            </div>
+            <div id="insp-config-details" style="font-size: 0.85rem; color: #cbd5e1; display: flex; flex-direction: column; gap: 6px;"></div>
+          </div>
+
+          <div class="section-card" id="insp-execution-card">
+            <div class="section-title">
+              <span>⚡ Execution Status</span>
+              <span id="insp-iter-count" style="color: var(--accent); font-size: 0.75rem;"></span>
+            </div>
+            
+            <div id="insp-error-wrap" style="display: none;">
+              <div style="font-size: 0.75rem; color: #f87171; font-weight: 600; margin-bottom: 4px;">Error:</div>
+              <div class="error-content" id="insp-error"></div>
+            </div>
+
+            <div id="insp-history-wrap" style="display: none; margin-top: 8px;">
+              <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Past Iteration History</div>
+              <div id="insp-history-list" style="display: flex; flex-direction: column; gap: 6px; margin-top: 6px;"></div>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-title">
+              <span>ℹ️ Node Metadata</span>
+            </div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); display: grid; grid-template-columns: 90px 1fr; gap: 6px;">
+              <div>Node ID:</div>
+              <div style="font-family: monospace; color: #e2e8f0;" id="insp-node-id"></div>
+              <div>Workflow ID:</div>
+              <div style="font-family: monospace; color: #e2e8f0;" id="insp-wf-id"></div>
+              <div>Updated:</div>
+              <div id="insp-updated-at"></div>
+            </div>
           </div>
         </div>
+      </div>
 
+      <!-- Message Board Tab Content -->
+      <div id="tab-content-messages" class="tab-pane">
+        <div class="msg-board-header">
+          <div class="msg-filters">
+            <input type="text" id="msg-filter-task" class="search-input" style="width: 100%;" placeholder="Filter by Task ID (e.g. tk-123)...">
+            <div style="display: flex; gap: 6px;">
+              <input type="text" id="msg-filter-role" class="search-input" style="flex: 1;" placeholder="Filter by Role...">
+              <input type="text" id="msg-filter-topic" class="search-input" style="flex: 1;" placeholder="Filter by Topic...">
+            </div>
+          </div>
+        </div>
+        <div class="msg-board-body" id="msg-board-list">
+          <!-- Messages will be rendered dynamically -->
+        </div>
       </div>
     </div>
   </div>

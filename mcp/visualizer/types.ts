@@ -1,4 +1,4 @@
-import type { ViewTicket, WorkflowExportBundle } from "../../store/types.ts";
+import type { ExecutionMessage, ViewTicket, WorkflowExportBundle } from "../../store/types.ts";
 
 export interface SsrVisualizerOptions {
   bundle: WorkflowExportBundle;
@@ -6,6 +6,7 @@ export interface SsrVisualizerOptions {
   viewTicket?: ViewTicket | null;
   serverOrigin?: string;
   isStandaloneFile?: boolean;
+  messages?: ExecutionMessage[];
 }
 
 export function escapeHtml(text: string | null | undefined): string {

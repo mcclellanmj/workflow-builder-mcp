@@ -1,5 +1,5 @@
 /**
- * Deno KV persistence for workflow, node, and role memories with access tracking.
+ * Deno KV persistence for workflow, node, and task memories with access tracking.
  */
 
 import type {
@@ -15,16 +15,18 @@ import { getKv, MAX_ATOMIC_OPS, MAX_GET_MANY_KEYS, resolveUserId } from "./clien
 
 /** Input payload for saving or updating a memory. */
 export interface SaveMemoryInput {
+  workflowId: WorkflowId;
   key: string;
   summary: string;
   content: string;
-  scope: MemoryScope;
-  workflowId?: WorkflowId;
+  scope?: MemoryScope;
   nodeId?: NodeId;
-  roleId?: string;
-  source?: string;
+  taskId?: TaskId;
   tags?: string[];
+  source?: string;
   embedding?: number[];
+  // Backwards compatibility / optional fields
+  roleId?: string;
 }
 
 /** Result returned after saving a memory. */
@@ -36,14 +38,15 @@ export interface SaveMemoryResult {
 /** Short memory summary returned when listing memories. Content is intentionally omitted. */
 export interface MemorySummary {
   id: string;
+  workflowId: WorkflowId;
+  nodeId?: NodeId;
+  taskId?: TaskId;
+  roleId?: string;
+  scope?: MemoryScope;
   key: string;
   summary: string;
-  scope: MemoryScope;
-  workflowId?: WorkflowId;
-  nodeId?: NodeId;
-  roleId?: string;
+  tags: string[];
   source?: string;
-  tags?: string[];
   lastAccessed?: string;
   accessCount?: number;
   createdAt: string;
@@ -54,64 +57,49 @@ export interface MemorySummary {
 export interface MemoryFilters {
   workflowId?: WorkflowId;
   nodeId?: NodeId;
-  roleId?: string;
+  taskId?: TaskId;
   scope?: MemoryScope;
   tags?: string[];
   limit?: number;
   userId?: string;
+  // Backwards compatibility
+  roleId?: string;
 }
 
 /** Parameters for recalling a memory. */
 export interface RecallMemoryParams {
   key?: string;
   id?: string;
-  scope?: MemoryScope;
   workflowId?: WorkflowId;
   nodeId?: NodeId;
-  roleId?: string;
+  taskId?: TaskId;
   accessedBy?: string;
   executionId?: ExecutionId;
-  taskId?: TaskId;
 }
 
 /** Parameters for deleting a memory. */
 export interface DeleteMemoryParams {
   id?: string;
   key?: string;
-  scope?: MemoryScope;
   workflowId?: WorkflowId;
   nodeId?: NodeId;
-  roleId?: string;
-}
-
-/** Helper to compute scope reference identifier. */
-export function getScopeRef(
-  scope: MemoryScope,
-  workflowId?: string,
-  nodeId?: string,
-  roleId?: string,
-): string {
-  if (scope === "workflow") {
-    return (workflowId && workflowId.trim().length > 0) ? workflowId.trim() : "global";
-  } else if (scope === "node") {
-    const wf = (workflowId && workflowId.trim().length > 0) ? workflowId.trim() : "_";
-    const nd = (nodeId && nodeId.trim().length > 0) ? nodeId.trim() : "_";
-    return `${wf}:${nd}`;
-  } else if (scope === "role") {
-    return (roleId && roleId.trim().length > 0) ? roleId.trim() : "global";
-  }
-  return "global";
+  taskId?: TaskId;
 }
 
 /**
- * Saves a memory entry. If a memory with the same key exists in the specified scope,
+ * Saves a memory entry. If a memory with the same key exists in the workflow,
  * it updates the existing entry (upsert behavior).
  */
 export async function saveMemory(
   input: SaveMemoryInput,
   userId?: string,
 ): Promise<SaveMemoryResult> {
-  const trimmedKey = input.key.trim();
+  const workflowId = input.workflowId?.trim();
+  if (!workflowId) {
+    throw new Error("Workflow ID is required to save memory");
+  }
+
+  const trimmedKey = input.key?.trim();
   if (!trimmedKey) {
     throw new Error("Memory key cannot be empty");
   }
@@ -125,33 +113,41 @@ export async function saveMemory(
   const uid = resolveUserId(userId);
   const kv = await getKv();
 
-  const scope = input.scope;
-  const scopeRef = getScopeRef(scope, input.workflowId, input.nodeId, input.roleId);
-
-  // Check if a memory with this key already exists in this scope
-  const keyIndex = await kv.get<string>(["users", uid, "memory_keys", scope, scopeRef, trimmedKey]);
-
+  // Check if a memory with this key already exists in this workflow
+  const keyIndex = await kv.get<string>(["users", uid, "memory_keys", workflowId, trimmedKey]);
   const now = new Date().toISOString();
 
   if (keyIndex.value) {
-    // Update existing memory
     const existingEntry = await kv.get<Memory>(["users", uid, "memories", keyIndex.value]);
     if (existingEntry.value) {
+      const existing = existingEntry.value;
+      const scope: MemoryScope = input.scope || (input.nodeId ? "node" : (input.taskId ? "task" : (workflowId && workflowId !== "global" ? "workflow" : "global")));
       const updated: Memory = {
-        ...existingEntry.value,
+        ...existing,
+        workflowId,
+        nodeId: input.nodeId !== undefined ? input.nodeId : existing.nodeId,
+        taskId: input.taskId !== undefined ? input.taskId : existing.taskId,
+        roleId: input.roleId !== undefined ? input.roleId : existing.roleId,
         summary: input.summary.trim(),
         content: input.content,
-        source: input.source !== undefined ? input.source : existingEntry.value.source,
-        tags: input.tags !== undefined ? input.tags : existingEntry.value.tags,
-        embedding: input.embedding !== undefined ? input.embedding : existingEntry.value.embedding,
-        accessCount: existingEntry.value.accessCount,
-        lastAccessed: existingEntry.value.lastAccessed,
+        scope: input.scope !== undefined ? input.scope : (existing.scope ?? scope),
+        source: input.source !== undefined ? input.source : existing.source,
+        tags: input.tags !== undefined ? input.tags : (existing.tags ?? []),
+        embedding: input.embedding !== undefined ? input.embedding : existing.embedding,
         updatedAt: now,
       };
 
       const atomic = kv.atomic()
         .set(["users", uid, "memories", updated.id], updated)
-        .set(["users", uid, "memories_by_scope", updated.scope, updated.id], updated.id);
+        .set(["users", uid, "memories_by_workflow", workflowId, updated.id], updated.id);
+
+      if (updated.nodeId) {
+        atomic.set(["users", uid, "memories_by_node", workflowId, updated.nodeId, updated.id], updated.id);
+      }
+      if (updated.taskId) {
+        atomic.set(["users", uid, "memories_by_task", updated.taskId, updated.id], updated.id);
+      }
+
       const res = await atomic.commit();
       if (!res.ok) {
         throw new Error(`Failed to update memory with key "${trimmedKey}"`);
@@ -162,6 +158,7 @@ export async function saveMemory(
 
   // Create new memory
   const id = `mem-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
+  const scope: MemoryScope = input.scope || (input.nodeId ? "node" : (input.taskId ? "task" : (workflowId && workflowId !== "global" ? "workflow" : "global")));
   const memory: Memory = {
     id,
     userId: uid,
@@ -169,11 +166,12 @@ export async function saveMemory(
     summary: input.summary.trim(),
     content: input.content,
     scope,
-    workflowId: input.workflowId,
+    workflowId,
     nodeId: input.nodeId,
+    taskId: input.taskId,
     roleId: input.roleId,
+    tags: input.tags ?? [],
     source: input.source,
-    tags: input.tags,
     embedding: input.embedding,
     accessCount: 0,
     createdAt: now,
@@ -182,15 +180,14 @@ export async function saveMemory(
 
   const atomic = kv.atomic()
     .set(["users", uid, "memories", id], memory)
-    .set(["users", uid, "memory_keys", scope, scopeRef, trimmedKey], id)
-    .set(["users", uid, "memories_by_scope", memory.scope, id], id);
+    .set(["users", uid, "memory_keys", workflowId, trimmedKey], id)
+    .set(["users", uid, "memories_by_workflow", workflowId, id], id);
 
-  if (scope === "workflow" && memory.workflowId) {
-    atomic.set(["users", uid, "memories_by_workflow", memory.workflowId, id], id);
-  } else if (scope === "node" && memory.nodeId) {
-    atomic.set(["users", uid, "memories_by_node", memory.workflowId || "_", memory.nodeId, id], id);
-  } else if (scope === "role" && memory.roleId) {
-    atomic.set(["users", uid, "memories_by_role", memory.roleId, id], id);
+  if (memory.nodeId) {
+    atomic.set(["users", uid, "memories_by_node", workflowId, memory.nodeId, id], id);
+  }
+  if (memory.taskId) {
+    atomic.set(["users", uid, "memories_by_task", memory.taskId, id], id);
   }
 
   const res = await atomic.commit();
@@ -212,8 +209,7 @@ export async function getMemory(memoryId: string, userId?: string): Promise<Memo
 }
 
 /**
- * Lists memories matching the given filters. Returns summaries only (no content),
- * enriched with the lastAccessed timestamp and access count from the memory document.
+ * Lists memories matching the given filters. Returns summaries only (no content).
  */
 export async function listMemories(
   filters?: MemoryFilters,
@@ -224,28 +220,22 @@ export async function listMemories(
 
   let candidateIds: string[] | null = null;
 
-  if (filters?.roleId) {
+  if (filters?.taskId) {
     const ids: string[] = [];
     for await (
-      const entry of kv.list<string>({ prefix: ["users", uid, "memories_by_role", filters.roleId] })
+      const entry of kv.list<string>({ prefix: ["users", uid, "memories_by_task", filters.taskId] })
     ) {
       if (entry.value) ids.push(entry.value);
     }
     candidateIds = ids;
-  } else if (filters?.nodeId) {
+  } else if (filters?.nodeId && filters?.workflowId) {
     const ids: string[] = [];
-    const prefix = filters.workflowId
-      ? ["users", uid, "memories_by_node", filters.workflowId, filters.nodeId]
-      : ["users", uid, "memories_by_node"];
-    for await (const entry of kv.list<string>({ prefix })) {
-      if (filters.workflowId) {
-        if (entry.value) ids.push(entry.value);
-      } else {
-        // entry.key: ["users", uid, "memories_by_node", wfId, nodeId, memId]
-        if (entry.key[4] === filters.nodeId && entry.value) {
-          ids.push(entry.value);
-        }
-      }
+    for await (
+      const entry of kv.list<string>({
+        prefix: ["users", uid, "memories_by_node", filters.workflowId, filters.nodeId],
+      })
+    ) {
+      if (entry.value) ids.push(entry.value);
     }
     candidateIds = ids;
   } else if (filters?.workflowId) {
@@ -253,16 +243,6 @@ export async function listMemories(
     for await (
       const entry of kv.list<string>({
         prefix: ["users", uid, "memories_by_workflow", filters.workflowId],
-      })
-    ) {
-      if (entry.value) ids.push(entry.value);
-    }
-    candidateIds = ids;
-  } else if (filters?.scope) {
-    const ids: string[] = [];
-    for await (
-      const entry of kv.list<string>({
-        prefix: ["users", uid, "memories_by_scope", filters.scope],
       })
     ) {
       if (entry.value) ids.push(entry.value);
@@ -291,9 +271,10 @@ export async function listMemories(
   // Filter remaining criteria
   let filtered = memories.filter((m) => {
     if (filters?.scope && m.scope !== filters.scope) return false;
+    if (filters?.roleId && m.roleId !== filters.roleId) return false;
     if (filters?.workflowId && m.workflowId !== filters.workflowId) return false;
     if (filters?.nodeId && m.nodeId !== filters.nodeId) return false;
-    if (filters?.roleId && m.roleId !== filters.roleId) return false;
+    if (filters?.taskId && m.taskId !== filters.taskId) return false;
     if (filters?.tags && filters.tags.length > 0) {
       const memTags = m.tags || [];
       const hasAllTags = filters.tags.every((t) => memTags.includes(t));
@@ -308,14 +289,15 @@ export async function listMemories(
 
   return filtered.map((m) => ({
     id: m.id,
-    key: m.key,
-    summary: m.summary,
-    scope: m.scope,
     workflowId: m.workflowId,
     nodeId: m.nodeId,
+    taskId: m.taskId,
     roleId: m.roleId,
+    scope: m.scope,
+    key: m.key,
+    summary: m.summary,
+    tags: m.tags || [],
     source: m.source,
-    tags: m.tags,
     lastAccessed: m.lastAccessed,
     accessCount: m.accessCount ?? 0,
     createdAt: m.createdAt,
@@ -340,31 +322,26 @@ export async function recallMemory(
     memory = await getMemory(params.id, uid);
   } else if (params.key) {
     const trimmedKey = params.key.trim();
-    if (params.scope) {
-      const scopeRef = getScopeRef(params.scope, params.workflowId, params.nodeId, params.roleId);
+    if (params.workflowId) {
       const keyEntry = await kv.get<string>([
         "users",
         uid,
         "memory_keys",
-        params.scope,
-        scopeRef,
+        params.workflowId,
         trimmedKey,
       ]);
       if (keyEntry.value) {
         memory = await getMemory(keyEntry.value, uid);
       }
     } else {
-      // Look through memory_keys prefixes to find a match
+      // Search memory_keys across workflows
       for await (
         const entry of kv.list<string>({ prefix: ["users", uid, "memory_keys"] })
       ) {
-        // entry.key: ["users", uid, "memory_keys", scope, scopeRef, key]
-        if (entry.key[5] === trimmedKey && entry.value) {
+        // key format: ["users", uid, "memory_keys", workflowId, key]
+        if (entry.key[4] === trimmedKey && entry.value) {
           const candidate = await getMemory(entry.value, uid);
           if (candidate) {
-            if (params.workflowId && candidate.workflowId !== params.workflowId) continue;
-            if (params.nodeId && candidate.nodeId !== params.nodeId) continue;
-            if (params.roleId && candidate.roleId !== params.roleId) continue;
             memory = candidate;
             break;
           }
@@ -455,7 +432,6 @@ export async function recordMemoryAccess(
 
 /**
  * Deletes a memory and all its index entries and access logs.
- * Returns { deleted: boolean, accessCount: number }.
  */
 export async function deleteMemory(
   params: DeleteMemoryParams,
@@ -467,36 +443,17 @@ export async function deleteMemory(
   let memory: Memory | null = null;
   if (params.id) {
     memory = await getMemory(params.id, uid);
-  } else if (params.key) {
+  } else if (params.key && params.workflowId) {
     const trimmedKey = params.key.trim();
-    if (params.scope) {
-      const scopeRef = getScopeRef(params.scope, params.workflowId, params.nodeId, params.roleId);
-      const keyEntry = await kv.get<string>([
-        "users",
-        uid,
-        "memory_keys",
-        params.scope,
-        scopeRef,
-        trimmedKey,
-      ]);
-      if (keyEntry.value) {
-        memory = await getMemory(keyEntry.value, uid);
-      }
-    } else {
-      for await (
-        const entry of kv.list<string>({ prefix: ["users", uid, "memory_keys"] })
-      ) {
-        if (entry.key[5] === trimmedKey && entry.value) {
-          const candidate = await getMemory(entry.value, uid);
-          if (candidate) {
-            if (params.workflowId && candidate.workflowId !== params.workflowId) continue;
-            if (params.nodeId && candidate.nodeId !== params.nodeId) continue;
-            if (params.roleId && candidate.roleId !== params.roleId) continue;
-            memory = candidate;
-            break;
-          }
-        }
-      }
+    const keyEntry = await kv.get<string>([
+      "users",
+      uid,
+      "memory_keys",
+      params.workflowId,
+      trimmedKey,
+    ]);
+    if (keyEntry.value) {
+      memory = await getMemory(keyEntry.value, uid);
     }
   }
 
@@ -504,7 +461,6 @@ export async function deleteMemory(
     return { deleted: false, accessCount: 0 };
   }
 
-  // Count and collect access log keys
   const accessLogKeys: Deno.KvKey[] = [];
   for await (
     const entry of kv.list<MemoryAccessRecord>({
@@ -531,29 +487,19 @@ export async function deleteMemory(
   opCount++;
 
   // 2. Delete key index
-  const scopeRef = getScopeRef(memory.scope, memory.workflowId, memory.nodeId, memory.roleId);
-  atomic.delete(["users", uid, "memory_keys", memory.scope, scopeRef, memory.key]);
+  atomic.delete(["users", uid, "memory_keys", memory.workflowId, memory.key]);
   opCount++;
 
   // 3. Delete secondary indexes
-  atomic.delete(["users", uid, "memories_by_scope", memory.scope, memory.id]);
+  atomic.delete(["users", uid, "memories_by_workflow", memory.workflowId, memory.id]);
   opCount++;
 
-  if (memory.scope === "workflow" && memory.workflowId) {
-    atomic.delete(["users", uid, "memories_by_workflow", memory.workflowId, memory.id]);
+  if (memory.nodeId) {
+    atomic.delete(["users", uid, "memories_by_node", memory.workflowId, memory.nodeId, memory.id]);
     opCount++;
-  } else if (memory.scope === "node" && memory.nodeId) {
-    atomic.delete([
-      "users",
-      uid,
-      "memories_by_node",
-      memory.workflowId || "_",
-      memory.nodeId,
-      memory.id,
-    ]);
-    opCount++;
-  } else if (memory.scope === "role" && memory.roleId) {
-    atomic.delete(["users", uid, "memories_by_role", memory.roleId, memory.id]);
+  }
+  if (memory.taskId) {
+    atomic.delete(["users", uid, "memories_by_task", memory.taskId, memory.id]);
     opCount++;
   }
 
@@ -591,7 +537,6 @@ export async function getMemoryAccessLog(
     }
   }
 
-  // Sort by accessedAt ascending
   records.sort((a, b) => a.accessedAt.localeCompare(b.accessedAt));
   return options?.limit ? records.slice(0, options.limit) : records;
 }

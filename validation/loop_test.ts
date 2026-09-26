@@ -42,7 +42,11 @@ Deno.test("validateGraph - valid review-fix gated loop", () => {
   const nodes: WorkflowNode[] = [
     createMockNode("start-1", "start", "Start"),
     createMockNode("review", "step", "Code Review"),
-    createMockNode("decision", "decision", "Score Check", { options: ["fix", "pass"] }),
+    createMockNode("decision", "decision", "Score Check", {
+      field: "reviewResult",
+      default: "pass",
+      map: { "needs_fix": "fix", "approved": "pass" },
+    }),
     createMockNode("fix", "step", "Fix Issues"),
     createMockNode("end-1", "end", "End"),
   ];
@@ -116,7 +120,11 @@ Deno.test("validateGraph - cycle with decision node but no exit path rejected", 
   const nodes: WorkflowNode[] = [
     createMockNode("start-1", "start", "Start"),
     createMockNode("review", "step", "Review"),
-    createMockNode("dec", "decision", "Decision", { options: ["fix", "retry"] }),
+    createMockNode("dec", "decision", "Decision", {
+      field: "action",
+      default: "retry",
+      map: { "do_fix": "fix", "do_retry": "retry" },
+    }),
     createMockNode("fix", "step", "Fix"),
     createMockNode("end-1", "end", "End"),
   ];

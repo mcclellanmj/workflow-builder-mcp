@@ -14,7 +14,7 @@ const TaskClaimSchema = z.object({
     "Identifier of the agent, subagent, or user claiming this task (e.g. 'frontend-agent-1', 'user-matt').",
   ),
   role: z.string().optional().describe(
-    "Optional role of the claimant to verify against the active pipeline stage role requirement.",
+    "Optional role of the claimant to verify against the task role requirement.",
   ),
 }).refine((data) => data.task || data.taskId, {
   message: "Task ('task' or 'taskId') must be provided.",

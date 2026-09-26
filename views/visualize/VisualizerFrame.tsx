@@ -13,11 +13,31 @@ export interface TicketInfo {
   isActive?: boolean;
 }
 
+export interface ExecutionMessageItem {
+  id: string;
+  executionId: string;
+  workflowId: string;
+  taskId?: string;
+  nodeId?: string;
+  author: string;
+  role?: string;
+  topic?: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface DecisionConfigData {
+  field?: string;
+  map?: Record<string, string>;
+  numericRules?: Array<{ op: string; value: number; condition: string }>;
+  default?: string;
+}
+
 export interface NodeInspectorData {
   id: string;
   name: string;
   type: string;
-  status: "completed" | "running" | "pending" | "failed" | "skipped" | string;
+  status: "completed" | "running" | "waiting_for_children" | "pending" | "failed" | "skipped" | string;
   isSubagent?: boolean;
   prompt?: string;
   config?: Record<string, unknown>;
@@ -28,6 +48,9 @@ export interface NodeInspectorData {
   updatedAt?: string;
   hasSubworkflow?: boolean;
   subworkflowId?: string;
+  joinPolicy?: "all" | "any" | "m_of_n" | string;
+  joinThreshold?: number;
+  decisionConfig?: DecisionConfigData;
 }
 
 export interface LegendItem {
@@ -57,6 +80,10 @@ export interface VisualizerFrameProps {
   layoutDirection?: "TB" | "LR";
   /** Whether to render legend panel */
   showLegend?: boolean;
+  /** Execution message board messages */
+  messages?: ExecutionMessageItem[];
+  /** Currently active side drawer tab ("inspector" or "messages") */
+  activeTab?: "inspector" | "messages";
   /** Event handlers for toolbar buttons */
   onZoomIn?: () => void;
   onZoomOut?: () => void;
@@ -66,6 +93,7 @@ export interface VisualizerFrameProps {
   onLayoutToggle?: () => void;
   onCloseInspector?: () => void;
   onDrilldownSubworkflow?: (subworkflowId?: string) => void;
+  onTabChange?: (tab: "inspector" | "messages") => void;
   /** Custom canvas content or overlays */
   children?: ComponentChildren;
   /** Custom class overrides */
@@ -76,6 +104,7 @@ export interface VisualizerFrameProps {
 const DEFAULT_LEGEND_ITEMS: LegendItem[] = [
   { color: "bg-emerald-500", label: "Completed", description: "Node executed successfully" },
   { color: "bg-sky-500", label: "Running", description: "Node currently executing" },
+  { color: "bg-indigo-400", label: "Waiting for Children", description: "Awaiting subworkflow or child nodes" },
   { color: "bg-amber-500", label: "Pending", description: "Waiting to execute" },
   { color: "bg-rose-500", label: "Failed", description: "Error during execution" },
   { color: "bg-slate-500", label: "Skipped", description: "Conditional branch bypassed" },
@@ -102,6 +131,8 @@ export function VisualizerFrame({
   autoRefresh = true,
   layoutDirection = "TB",
   showLegend = true,
+  messages = [],
+  activeTab = "inspector",
   onZoomIn,
   onZoomOut,
   onResetZoom,
@@ -110,6 +141,7 @@ export function VisualizerFrame({
   onLayoutToggle,
   onCloseInspector,
   onDrilldownSubworkflow,
+  onTabChange,
   children,
   class: classProp,
   className,
@@ -201,6 +233,7 @@ export function VisualizerFrame({
             <option value="all">Status: All</option>
             <option value="completed">Status: Completed ✅</option>
             <option value="running">Status: Running 🔄</option>
+            <option value="waiting_for_children">Status: Waiting for Children ⏸️</option>
             <option value="pending">Status: Pending ⏳</option>
             <option value="failed">Status: Failed ❌</option>
             <option value="skipped">Status: Skipped ⏭️</option>
@@ -233,6 +266,23 @@ export function VisualizerFrame({
               class={`font-bold ${autoRefresh ? "text-emerald-400" : "text-gray-500"}`}
             >
               {autoRefresh ? "ON" : "OFF"}
+            </span>
+          </button>
+
+          {/* Message Board Toggle Button */}
+          <button
+            id="msg-board-toggle-btn"
+            type="button"
+            onClick={() => onTabChange?.(activeTab === "messages" ? "inspector" : "messages")}
+            class="bg-gray-800 hover:bg-gray-700 active:bg-gray-600 border border-gray-700 text-gray-200 text-xs font-medium rounded-md px-2.5 py-1.5 inline-flex items-center gap-1.5 transition-colors shadow-sm"
+            title="Toggle Execution Message Board"
+          >
+            <span>💬 Messages</span>
+            <span
+              id="header-msg-count"
+              class="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-indigo-950 text-indigo-300 border border-indigo-800 font-mono"
+            >
+              {messages.length}
             </span>
           </button>
 
@@ -351,51 +401,51 @@ export function VisualizerFrame({
           {children}
         </div>
 
-        {/* Node Details Inspector Drawer */}
+        {/* Node Details Inspector Drawer & Message Board */}
         <aside
           id="inspector"
-          class={`absolute top-0 right-0 bottom-0 w-[420px] max-w-[90vw] bg-gray-900 border-l border-gray-800 flex flex-col z-50 shadow-2xl transition-transform duration-300 ease-out select-text ${
-            inspectorOpen || selectedNode ? "" : "hidden translate-x-full pointer-events-none"
+          class={`absolute top-0 right-0 bottom-0 w-[440px] max-w-[90vw] bg-gray-900 border-l border-gray-800 flex flex-col z-50 shadow-2xl transition-transform duration-300 ease-out select-text ${
+            inspectorOpen || selectedNode || activeTab === "messages" ? "" : "hidden translate-x-full pointer-events-none"
           }`}
-          aria-label="Node Details Inspector"
+          aria-label="Node Details Inspector and Message Board"
         >
-          {/* Inspector Header */}
-          <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between gap-3">
-            <div class="flex flex-col gap-1 overflow-hidden">
-              <h2
-                id="insp-name"
-                class="text-sm font-bold text-gray-100 truncate"
+          {/* Panel Navigation Tabs */}
+          <div class="flex items-center border-b border-gray-800 bg-gray-950/70 px-4 pt-2 gap-2">
+            <button
+              id="tab-btn-inspector"
+              type="button"
+              onClick={() => onTabChange?.("inspector")}
+              class={`px-3 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors inline-flex items-center gap-1.5 ${
+                activeTab === "inspector"
+                  ? "border-sky-400 text-sky-400"
+                  : "border-transparent text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              <span>🔍 Inspector</span>
+            </button>
+            <button
+              id="tab-btn-messages"
+              type="button"
+              onClick={() => onTabChange?.("messages")}
+              class={`px-3 py-2 text-xs font-semibold border-b-2 -mb-px transition-colors inline-flex items-center gap-1.5 ${
+                activeTab === "messages"
+                  ? "border-sky-400 text-sky-400"
+                  : "border-transparent text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              <span>💬 Message Board</span>
+              <span
+                id="msg-board-count"
+                class="px-1.5 py-0.5 rounded-full text-[10px] bg-gray-800 text-gray-300 font-mono"
               >
-                {selectedNode?.name ?? "Node Details"}
-              </h2>
-              <div class="flex items-center gap-1.5 flex-wrap">
-                <span
-                  id="insp-type-badge"
-                  class="px-2 py-0.5 text-[11px] font-medium rounded bg-gray-800 text-sky-400 border border-gray-700 uppercase"
-                >
-                  {selectedNode?.type ?? "step"}
-                </span>
-                <span
-                  id="insp-status-badge"
-                  class="px-2 py-0.5 text-[11px] font-medium rounded bg-gray-800 text-amber-400 border border-amber-900/60 uppercase"
-                >
-                  {selectedNode?.status ?? "pending"}
-                </span>
-                <span
-                  id="insp-subagent-badge"
-                  class={`px-2 py-0.5 text-[11px] font-medium rounded bg-indigo-950 text-indigo-300 border border-indigo-800 uppercase ${
-                    selectedNode?.isSubagent ? "inline-flex" : "hidden"
-                  }`}
-                >
-                  ⚡ Sub-Agent
-                </span>
-              </div>
-            </div>
+                {messages.length}
+              </span>
+            </button>
             <button
               id="close-inspector-btn"
               type="button"
               onClick={onCloseInspector}
-              class="text-gray-400 hover:text-white p-1 rounded hover:bg-gray-800 transition-colors"
+              class="ml-auto text-gray-400 hover:text-white p-1 rounded hover:bg-gray-800 transition-colors"
               title="Close Drawer"
             >
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -409,139 +459,345 @@ export function VisualizerFrame({
             </button>
           </div>
 
-          {/* Inspector Body Content */}
-          <div class="flex-1 p-5 overflow-y-auto flex flex-col gap-4 text-xs">
-            {/* Subworkflow Drilldown Action */}
-            <div
-              id="insp-subworkflow-action"
-              class={selectedNode?.hasSubworkflow ? "block" : "hidden"}
-            >
-              <button
-                id="insp-drilldown-btn"
-                type="button"
-                onClick={() => onDrilldownSubworkflow?.(selectedNode?.subworkflowId)}
-                class="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-white font-semibold py-2 px-3 rounded-lg shadow-md flex items-center justify-center gap-2 transition-all duration-150"
-              >
-                <span>📦 Drill Down into Subworkflow</span>
-              </button>
+          {/* Tab 1: Node Inspector */}
+          <div
+            id="tab-content-inspector"
+            class={`flex-1 flex flex-col overflow-hidden ${activeTab === "inspector" ? "flex" : "hidden"}`}
+          >
+            {/* Inspector Header */}
+            <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between gap-3">
+              <div class="flex flex-col gap-1.5 overflow-hidden">
+                <h2
+                  id="insp-name"
+                  class="text-sm font-bold text-gray-100 truncate"
+                >
+                  {selectedNode?.name ?? "Node Details"}
+                </h2>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span
+                    id="insp-type-badge"
+                    class="px-2 py-0.5 text-[11px] font-medium rounded bg-gray-800 text-sky-400 border border-gray-700 uppercase"
+                  >
+                    {selectedNode?.type ?? "step"}
+                  </span>
+                  <span
+                    id="insp-status-badge"
+                    class="px-2 py-0.5 text-[11px] font-medium rounded bg-gray-800 text-amber-400 border border-amber-900/60 uppercase"
+                  >
+                    {selectedNode?.status ?? "pending"}
+                  </span>
+                  <span
+                    id="insp-barrier-badge"
+                    class={`px-2 py-0.5 text-[11px] font-medium rounded bg-amber-950 text-amber-300 border border-amber-800 uppercase items-center gap-1 ${
+                      selectedNode?.joinPolicy ? "inline-flex" : "hidden"
+                    }`}
+                    title="Barrier Join Policy"
+                  >
+                    🛡️ Barrier: {selectedNode?.joinPolicy ?? "all"}
+                    {selectedNode?.joinPolicy === "m_of_n" && selectedNode?.joinThreshold !== undefined
+                      ? ` (${selectedNode.joinThreshold})`
+                      : ""}
+                  </span>
+                  <span
+                    id="insp-subagent-badge"
+                    class={`px-2 py-0.5 text-[11px] font-medium rounded bg-indigo-950 text-indigo-300 border border-indigo-800 uppercase ${
+                      selectedNode?.isSubagent ? "inline-flex" : "hidden"
+                    }`}
+                  >
+                    ⚡ Sub-Agent
+                  </span>
+                  <span
+                    id="insp-subworkflow-badge"
+                    class={`px-2 py-0.5 text-[11px] font-medium rounded bg-purple-950 text-purple-300 border border-purple-800 uppercase ${
+                      selectedNode?.hasSubworkflow || selectedNode?.subworkflowId || selectedNode?.type === "subworkflow"
+                        ? "inline-flex"
+                        : "hidden"
+                    }`}
+                  >
+                    📦 Subworkflow
+                  </span>
+                </div>
+              </div>
             </div>
 
-            {/* Prompt / Instruction Card */}
-            <div class="bg-gray-950 border border-gray-800 rounded-lg p-3.5 flex flex-col gap-2">
-              <div class="flex items-center justify-between text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                <span>📝 Prompt / Instruction</span>
+            {/* Inspector Body Content */}
+            <div class="flex-1 p-5 overflow-y-auto flex flex-col gap-4 text-xs">
+              {/* Subworkflow Drilldown Action */}
+              <div
+                id="insp-subworkflow-action"
+                class={selectedNode?.hasSubworkflow || selectedNode?.subworkflowId || selectedNode?.type === "subworkflow" ? "block" : "hidden"}
+              >
                 <button
-                  id="copy-prompt-btn"
+                  id="insp-drilldown-btn"
                   type="button"
-                  class="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-2 py-0.5 rounded text-[11px] transition-colors border border-gray-700/60"
+                  onClick={() => onDrilldownSubworkflow?.(selectedNode?.subworkflowId || (selectedNode?.config?.childWorkflowId as string))}
+                  class="w-full bg-gradient-to-r from-purple-700 to-indigo-600 hover:from-purple-600 hover:to-indigo-500 text-white font-semibold py-2 px-3 rounded-lg shadow-md flex items-center justify-center gap-2 transition-all duration-150"
                 >
-                  Copy
+                  <span>📦 Drill Down into Subworkflow</span>
+                  {(selectedNode?.subworkflowId || (selectedNode?.config?.childWorkflowId as string)) && (
+                    <span class="font-mono text-purple-200 text-[11px]">
+                      ({selectedNode?.subworkflowId || (selectedNode?.config?.childWorkflowId as string)})
+                    </span>
+                  )}
                 </button>
               </div>
-              <div
-                id="insp-prompt"
-                class="font-mono text-xs text-gray-300 bg-gray-900/90 border border-gray-800 rounded p-2.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed"
-              >
-                {selectedNode?.prompt ?? "No prompt available"}
-              </div>
-            </div>
 
-            {/* Configuration Card */}
-            <div
-              id="insp-config-card"
-              class="bg-gray-950 border border-gray-800 rounded-lg p-3.5 flex flex-col gap-2"
-            >
-              <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                ⚙️ Configuration
-              </div>
-              <div
-                id="insp-config-details"
-                class="text-xs text-gray-300 flex flex-col gap-1 font-mono"
-              >
-                {selectedNode?.config
-                  ? (
-                    Object.entries(selectedNode.config).map(([k, v]) => (
-                      <div key={k} class="flex justify-between border-b border-gray-900 pb-1">
-                        <span class="text-gray-500">{k}:</span>
-                        <span class="text-gray-200">{String(v)}</span>
-                      </div>
-                    ))
-                  )
-                  : <span class="text-gray-500 italic">No custom config</span>}
-              </div>
-            </div>
+              {/* Decision Node Rules & Maps */}
+              {(() => {
+                const decCfg = selectedNode?.decisionConfig ||
+                  (selectedNode?.config as DecisionConfigData | undefined);
+                const isDecision = selectedNode?.type === "decision" ||
+                  Boolean(decCfg?.field || decCfg?.map || decCfg?.numericRules || decCfg?.default);
+                const decField = decCfg?.field;
+                const decMap = decCfg?.map;
+                const decNumRules = decCfg?.numericRules;
+                const decDef = decCfg?.default;
 
-            {/* Execution Status Card */}
-            <div
-              id="insp-execution-card"
-              class="bg-gray-950 border border-gray-800 rounded-lg p-3.5 flex flex-col gap-2"
-            >
-              <div class="flex items-center justify-between text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                <span>⚡ Execution Status</span>
-                <span id="insp-iter-count" class="text-sky-400 font-mono text-[11px]">
-                  {selectedNode?.iterationCount !== undefined
-                    ? `Iter: ${selectedNode.iterationCount}`
-                    : ""}
-                </span>
-              </div>
-
-              {/* Error Box */}
-              <div
-                id="insp-error-wrap"
-                class={selectedNode?.error ? "block" : "hidden"}
-              >
-                <div class="text-[11px] text-red-400 font-bold mb-1">Error:</div>
-                <div
-                  id="insp-error"
-                  class="font-mono text-xs text-red-300 bg-red-950/60 border border-red-800/80 rounded p-2 whitespace-pre-wrap leading-relaxed"
-                >
-                  {selectedNode?.error ?? ""}
-                </div>
-              </div>
-
-              {/* Iteration History */}
-              <div
-                id="insp-history-wrap"
-                class={selectedNode?.history && selectedNode.history.length > 0
-                  ? "block mt-2"
-                  : "hidden mt-2"}
-              >
-                <div class="text-[10px] text-gray-500 font-bold uppercase mb-1.5">
-                  Past Iteration History
-                </div>
-                <div id="insp-history-list" class="flex flex-col gap-1.5">
-                  {selectedNode?.history?.map((h) => (
-                    <div
-                      key={h.iteration}
-                      class="bg-gray-900 border border-gray-800 rounded p-2 flex items-center justify-between text-xs"
-                    >
-                      <span class="font-semibold text-gray-300">Iter #{h.iteration}</span>
-                      <Badge status={h.status} size="sm" />
+                return (
+                  <div
+                    id="insp-decision-rules-card"
+                    class={isDecision ? "bg-gray-950 border border-amber-900/60 rounded-lg p-3.5 flex flex-col gap-2" : "hidden bg-gray-950 border border-amber-900/60 rounded-lg p-3.5 flex flex-col gap-2"}
+                  >
+                    <div class="flex items-center justify-between text-[11px] font-bold text-amber-400 uppercase tracking-wider">
+                      <span>⚖️ Decision Rules &amp; Maps</span>
+                      {decField && <span class="font-mono text-gray-400 lowercase">field: {decField}</span>}
                     </div>
-                  ))}
+                    <div id="insp-decision-rules-content" class="flex flex-col gap-2 text-xs font-mono">
+                      {decMap && Object.keys(decMap).length > 0 && (
+                        <div class="flex flex-col gap-1">
+                          <span class="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Discrete Map:</span>
+                          {Object.entries(decMap).map(([val, target]) => (
+                            <div key={val} class="flex items-center justify-between bg-gray-900 px-2 py-1 rounded border border-gray-800">
+                              <span class="text-sky-300">{val}</span>
+                              <span class="text-gray-500">&rarr;</span>
+                              <span class="text-emerald-400 font-semibold">{String(target)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {decNumRules && decNumRules.length > 0 && (
+                        <div class="flex flex-col gap-1">
+                          <span class="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Numeric Comparison Rules:</span>
+                          {decNumRules.map((rule, idx) => (
+                            <div key={idx} class="flex items-center justify-between bg-gray-900 px-2 py-1 rounded border border-gray-800">
+                              <span class="text-amber-300">{`${rule.op} ${rule.value}`}</span>
+                              <span class="text-gray-500">&rarr;</span>
+                              <span class="text-emerald-400 font-semibold">{rule.condition}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {decDef && (
+                        <div class="text-[11px] text-gray-400 pt-1 border-t border-gray-900 flex justify-between">
+                          <span>Default Fallback:</span>
+                          <span class="text-sky-400 font-semibold">{decDef}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Prompt / Instruction Card */}
+              <div class="bg-gray-950 border border-gray-800 rounded-lg p-3.5 flex flex-col gap-2">
+                <div class="flex items-center justify-between text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                  <span>📝 Prompt / Instruction</span>
+                  <button
+                    id="copy-prompt-btn"
+                    type="button"
+                    class="bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-2 py-0.5 rounded text-[11px] transition-colors border border-gray-700/60"
+                  >
+                    Copy
+                  </button>
+                </div>
+                <div
+                  id="insp-prompt"
+                  class="font-mono text-xs text-gray-300 bg-gray-900/90 border border-gray-800 rounded p-2.5 max-h-48 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed"
+                >
+                  {selectedNode?.prompt ?? "No prompt available"}
+                </div>
+              </div>
+
+              {/* Configuration Card */}
+              <div
+                id="insp-config-card"
+                class="bg-gray-950 border border-gray-800 rounded-lg p-3.5 flex flex-col gap-2"
+              >
+                <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                  ⚙️ Configuration
+                </div>
+                <div
+                  id="insp-config-details"
+                  class="text-xs text-gray-300 flex flex-col gap-1 font-mono"
+                >
+                  {selectedNode?.config
+                    ? (
+                      Object.entries(selectedNode.config).map(([k, v]) => (
+                        <div key={k} class="flex justify-between border-b border-gray-900 pb-1">
+                          <span class="text-gray-500">{k}:</span>
+                          <span class="text-gray-200">{String(v)}</span>
+                        </div>
+                      ))
+                    )
+                    : <span class="text-gray-500 italic">No custom config</span>}
+                </div>
+              </div>
+
+              {/* Execution Status Card */}
+              <div
+                id="insp-execution-card"
+                class="bg-gray-950 border border-gray-800 rounded-lg p-3.5 flex flex-col gap-2"
+              >
+                <div class="flex items-center justify-between text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                  <span>⚡ Execution Status</span>
+                  <span id="insp-iter-count" class="text-sky-400 font-mono text-[11px]">
+                    {selectedNode?.iterationCount !== undefined
+                      ? `Iter: ${selectedNode.iterationCount}`
+                      : ""}
+                  </span>
+                </div>
+
+                {/* Error Box */}
+                <div
+                  id="insp-error-wrap"
+                  class={selectedNode?.error ? "block" : "hidden"}
+                >
+                  <div class="text-[11px] text-red-400 font-bold mb-1">Error:</div>
+                  <div
+                    id="insp-error"
+                    class="font-mono text-xs text-red-300 bg-red-950/60 border border-red-800/80 rounded p-2 whitespace-pre-wrap leading-relaxed"
+                  >
+                    {selectedNode?.error ?? ""}
+                  </div>
+                </div>
+
+                {/* Iteration History */}
+                <div
+                  id="insp-history-wrap"
+                  class={selectedNode?.history && selectedNode.history.length > 0
+                    ? "block mt-2"
+                    : "hidden mt-2"}
+                >
+                  <div class="text-[10px] text-gray-500 font-bold uppercase mb-1.5">
+                    Past Iteration History
+                  </div>
+                  <div id="insp-history-list" class="flex flex-col gap-1.5">
+                    {selectedNode?.history?.map((h) => (
+                      <div
+                        key={h.iteration}
+                        class="bg-gray-900 border border-gray-800 rounded p-2 flex items-center justify-between text-xs"
+                      >
+                        <span class="font-semibold text-gray-300">Iter #{h.iteration}</span>
+                        <Badge status={h.status} size="sm" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Node Metadata Card */}
+              <div class="bg-gray-950 border border-gray-800 rounded-lg p-3.5 flex flex-col gap-2">
+                <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                  ℹ️ Node Metadata
+                </div>
+                <div class="grid grid-cols-[80px_1fr] gap-1.5 text-xs text-gray-400">
+                  <span>Node ID:</span>
+                  <span id="insp-node-id" class="font-mono text-gray-200 truncate">
+                    {selectedNode?.id ?? ""}
+                  </span>
+                  <span>Workflow:</span>
+                  <span id="insp-wf-id" class="font-mono text-gray-200 truncate">
+                    {selectedNode?.workflowId ?? workflowId ?? ""}
+                  </span>
+                  <span>Updated:</span>
+                  <span id="insp-updated-at" class="text-gray-300">
+                    {selectedNode?.updatedAt ?? ""}
+                  </span>
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* Node Metadata Card */}
-            <div class="bg-gray-950 border border-gray-800 rounded-lg p-3.5 flex flex-col gap-2">
-              <div class="text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                ℹ️ Node Metadata
+          {/* Tab 2: Message Board */}
+          <div
+            id="tab-content-messages"
+            class={`flex-1 flex flex-col overflow-hidden ${activeTab === "messages" ? "flex" : "hidden"}`}
+          >
+            {/* Filter Bar */}
+            <div class="p-4 border-b border-gray-800 bg-gray-950/60 flex flex-col gap-2.5">
+              <input
+                type="text"
+                id="msg-filter-task"
+                placeholder="Filter by Task ID (e.g. tk-123)..."
+                class="bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-500 text-xs rounded-md px-3 py-1.5 w-full focus:outline-none focus:border-sky-500 transition-colors shadow-inner"
+              />
+              <div class="flex items-center gap-2">
+                <input
+                  type="text"
+                  id="msg-filter-role"
+                  placeholder="Filter by Role..."
+                  class="bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-500 text-xs rounded-md px-3 py-1.5 flex-1 focus:outline-none focus:border-sky-500 transition-colors shadow-inner"
+                />
+                <input
+                  type="text"
+                  id="msg-filter-topic"
+                  placeholder="Filter by Topic..."
+                  class="bg-gray-900 border border-gray-700 text-gray-100 placeholder-gray-500 text-xs rounded-md px-3 py-1.5 flex-1 focus:outline-none focus:border-sky-500 transition-colors shadow-inner"
+                />
               </div>
-              <div class="grid grid-cols-[80px_1fr] gap-1.5 text-xs text-gray-400">
-                <span>Node ID:</span>
-                <span id="insp-node-id" class="font-mono text-gray-200 truncate">
-                  {selectedNode?.id ?? ""}
-                </span>
-                <span>Workflow:</span>
-                <span id="insp-wf-id" class="font-mono text-gray-200 truncate">
-                  {selectedNode?.workflowId ?? workflowId ?? ""}
-                </span>
-                <span>Updated:</span>
-                <span id="insp-updated-at" class="text-gray-300">
-                  {selectedNode?.updatedAt ?? ""}
-                </span>
-              </div>
+            </div>
+
+            {/* Message List */}
+            <div
+              id="msg-board-list"
+              class="flex-1 p-4 overflow-y-auto flex flex-col gap-3"
+            >
+              {messages.length === 0
+                ? (
+                  <div class="text-center py-8 text-xs text-gray-500 italic">
+                    No messages recorded for this execution.
+                  </div>
+                )
+                : (
+                  messages.map((msg) => (
+                    <div
+                      key={msg.id}
+                      class="msg-item bg-gray-950 border border-gray-800 rounded-lg p-3 flex flex-col gap-1.5 text-xs shadow-sm hover:border-gray-700 transition-colors"
+                      data-task-id={msg.taskId || ""}
+                      data-role={msg.role || ""}
+                      data-topic={msg.topic || ""}
+                    >
+                      <div class="flex items-center justify-between gap-2 flex-wrap">
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                          <span class="font-bold text-sky-400 font-mono text-[11px]">
+                            {msg.author}
+                          </span>
+                          {msg.role && (
+                            <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-indigo-950 text-indigo-300 border border-indigo-800">
+                              @{msg.role}
+                            </span>
+                          )}
+                          {msg.topic && (
+                            <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-sky-950 text-sky-300 border border-sky-800">
+                              #{msg.topic}
+                            </span>
+                          )}
+                          {msg.taskId && (
+                            <span class="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-950 text-purple-300 border border-purple-800">
+                              📋 {msg.taskId}
+                            </span>
+                          )}
+                        </div>
+                        <span class="text-[10px] text-gray-500">
+                          {msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString() : ""}
+                        </span>
+                      </div>
+                      <div class="text-gray-200 text-xs whitespace-pre-wrap leading-relaxed font-sans pt-1">
+                        {msg.content}
+                      </div>
+                    </div>
+                  ))
+                )}
             </div>
           </div>
         </aside>

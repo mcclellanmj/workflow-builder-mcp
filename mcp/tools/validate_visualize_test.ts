@@ -55,7 +55,7 @@ Deno.test("validateWorkflowTool and visualizeWorkflowTool test", async () => {
       name: "In Stock?",
       description: "Branch based on stock",
       runInSubAgent: false,
-      config: { options: ["yes", "no"] },
+      config: { field: "inStock", map: { "yes": "yes" }, default: "no" },
       status: "pending",
       error: null,
       createdAt: now,

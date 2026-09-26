@@ -119,6 +119,7 @@ Deno.test("User Scoped KV Store - Execution run isolation", async () => {
       id: "exec-100",
       workflowId: "wf-1",
       status: "in_progress",
+      context: {},
       nodeStates: {},
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),

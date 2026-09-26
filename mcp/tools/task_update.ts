@@ -26,6 +26,9 @@ const TaskUpdateSchema = z.object({
     "Optional new priority level.",
   ),
   role: z.string().optional().describe("Optional new role assignment."),
+  assignedWorkflowId: z.string().optional().describe(
+    "Optional subworkflow ID assigned to accomplish this task.",
+  ),
   context: z.string().optional().describe(
     "Optional context note to append to the task's working context.",
   ),
@@ -36,7 +39,7 @@ const TaskUpdateSchema = z.object({
 export const updateTaskTool = defineTool({
   name: "task_update",
   description:
-    "Updates an existing task's title, description, status, priority, role, or context. Appends to existing context if provided.",
+    "Updates an existing task's title, description, status, priority, role, assignedWorkflowId, or context. Appends to existing context if provided.",
   schema: TaskUpdateSchema,
   execute: async ({
     task,
@@ -46,6 +49,7 @@ export const updateTaskTool = defineTool({
     status,
     priority,
     role,
+    assignedWorkflowId,
     context,
   }) => {
     const identifier = (taskId ?? task)!.trim();
@@ -62,6 +66,7 @@ export const updateTaskTool = defineTool({
     if (status !== undefined) updates.status = status as TaskStatus;
     if (priority !== undefined) updates.priority = priority as TaskPriority;
     if (role !== undefined) updates.role = role;
+    if (assignedWorkflowId !== undefined) updates.assignedWorkflowId = assignedWorkflowId;
 
     if (context !== undefined) {
       const trimmedContext = context.trim();

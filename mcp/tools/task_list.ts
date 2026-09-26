@@ -3,7 +3,7 @@ import { listTasks } from "../../store/kv.ts";
 import type { TaskStatus } from "../../store/types.ts";
 import { defineTool, richResponse } from "../helpers.ts";
 import { resolveWorkflow } from "../resolvers.ts";
-import { formatTaskListMarkdown, resolveTask } from "./task_helpers.ts";
+import { formatReadyFrontierMarkdown, formatTaskListMarkdown, resolveTask } from "./task_helpers.ts";
 
 const TaskListSchema = z.object({
   workflow: z.string().optional().describe(
@@ -30,6 +30,12 @@ const TaskListSchema = z.object({
   parentTaskId: z.string().optional().describe(
     "Optional parent task ID to list child subtasks.",
   ),
+  readyOnly: z.boolean().optional().default(false).describe(
+    "When true, filters tasks using unblocked ready frontier logic (only claimable tasks with zero unresolved blockers), consolidating task_ready.",
+  ),
+  limit: z.number().int().positive().optional().describe(
+    "Optional maximum number of tasks to return.",
+  ),
   format: z.enum(["markdown", "json", "both"]).optional().default("both").describe(
     "Optional output format: 'markdown', 'json', or 'both' (default).",
   ),
@@ -38,7 +44,7 @@ const TaskListSchema = z.object({
 export const listTasksTool = defineTool({
   name: "task_list",
   description:
-    "Lists tasks matching specified filter criteria (workflow, execution, status, role, assignee, or parent task). Returns the list of tasks and a summary of counts by status.",
+    "Lists tasks matching specified filter criteria (workflow, execution, status, role, assignee, or parent task). Set readyOnly: true to return only unblocked claimable tasks (consolidating task_ready).",
   schema: TaskListSchema,
   execute: async ({
     workflow,
@@ -48,6 +54,8 @@ export const listTasksTool = defineTool({
     role,
     assignee,
     parentTaskId,
+    readyOnly = false,
+    limit,
     format,
   }) => {
     let actualWorkflowId = workflowId ?? workflow;
@@ -79,11 +87,15 @@ export const listTasksTool = defineTool({
 
     const tasks = await listTasks({
       workflowId: actualWorkflowId,
+      originWorkflowId: actualWorkflowId,
       executionId,
+      originExecutionId: executionId,
       status: parsedStatus,
       role,
       assignee,
       parentTaskId: actualParentTaskId,
+      readyOnly,
+      limit,
     });
 
     const summary = {
@@ -97,10 +109,16 @@ export const listTasksTool = defineTool({
       wontfix: tasks.filter((t) => t.status === "wontfix").length,
     };
 
-    const markdown = formatTaskListMarkdown(tasks, summary);
+    const markdown = readyOnly
+      ? formatReadyFrontierMarkdown(tasks)
+      : formatTaskListMarkdown(tasks, summary);
 
     return richResponse({
-      data: { tasks, summary },
+      data: {
+        tasks,
+        summary,
+        ...(readyOnly ? { readyTasks: tasks, frontierSize: tasks.length } : {}),
+      },
       markdown,
       format,
     });

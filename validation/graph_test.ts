@@ -49,7 +49,11 @@ Deno.test("validateGraph - valid DAG with single start, step, decision, and end 
   const nodes: WorkflowNode[] = [
     createMockNode("start-1", "start", "Start"),
     createMockNode("step-1", "step", "Step 1"),
-    createMockNode("dec-1", "decision", "Decision 1", { options: ["yes", "no"] }),
+    createMockNode("dec-1", "decision", "Decision 1", {
+      field: "outcome",
+      default: "no",
+      map: { "approve": "yes", "reject": "no" },
+    }),
     createMockNode("end-1", "end", "End"),
   ];
   const edges: WorkflowEdge[] = [
@@ -159,10 +163,14 @@ Deno.test("validateGraph - invalid edge references", () => {
   );
 });
 
-Deno.test("validateGraph - decision node option coverage warnings", () => {
+Deno.test("validateGraph - decision node condition validation (missing edge error, unreachable warning)", () => {
   const nodes = [
     createMockNode("start-1", "start", "Start"),
-    createMockNode("dec-1", "decision", "Decide", { options: ["opt-a", "opt-b", "opt-c"] }),
+    createMockNode("dec-1", "decision", "Decide", {
+      field: "status",
+      default: "opt-a",
+      map: { "b": "opt-b", "c": "opt-c" },
+    }),
     createMockNode("end-1", "end", "End"),
   ];
   const edges = [
@@ -172,21 +180,20 @@ Deno.test("validateGraph - decision node option coverage warnings", () => {
   ];
 
   const result = validateGraph(nodes, edges);
-  assertEquals(result.valid, true);
-  assertEquals(result.errors, []);
+  assertEquals(result.valid, false);
   assert(
-    result.warnings.includes(
-      'Decision node "Decide" has option "opt-b" with no matching outbound edge.',
+    result.errors.includes(
+      'Decision node "Decide" (dec-1) target condition "opt-b" has no matching outgoing edge.',
+    ),
+  );
+  assert(
+    result.errors.includes(
+      'Decision node "Decide" (dec-1) target condition "opt-c" has no matching outgoing edge.',
     ),
   );
   assert(
     result.warnings.includes(
-      'Decision node "Decide" has option "opt-c" with no matching outbound edge.',
-    ),
-  );
-  assert(
-    result.warnings.includes(
-      'Decision node "Decide" has edge with condition "unlisted-opt" that is not in its options [opt-a, opt-b, opt-c].',
+      'Decision node "Decide" (dec-1) has outgoing edge with condition "unlisted-opt" that is unreachable from config.',
     ),
   );
 });

@@ -1,6 +1,6 @@
 /**
  * Server-Side Rendered & Interactive Single-Page Web Application for Task Kanban Board,
- * Memory Vault & Explorer, and Role Journals.
+ * Memory Vault & Explorer, and Roles Catalog.
  * Powered by Preact SSR and modern modular client script.
  */
 
@@ -14,7 +14,7 @@ export interface TaskUiOptions {
   origin: string;
   userId?: string;
   userName?: string;
-  initialTab?: "tasks" | "memories" | "journals" | "roles";
+  initialTab?: "tasks" | "memories" | "roles";
 }
 
 /**

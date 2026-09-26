@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { saveNode } from "../../store/kv.ts";
-import type { WorkflowNode } from "../../store/types.ts";
+import type { JoinPolicy, WorkflowNode } from "../../store/types.ts";
 import { defineTool, jsonResponse, requireNode, validateNodeConfig } from "../helpers.ts";
 
 const EditNodeSchema = z.object({
@@ -23,8 +23,17 @@ const EditNodeSchema = z.object({
   runInSubAgent: z.boolean().optional().describe(
     "Optional flag indicating whether this node should be executed in a spawned sub-agent.",
   ),
+  role: z.string().optional().describe(
+    "Optional new workflow-scoped role assignment for this node.",
+  ),
+  joinPolicy: z.enum(["all", "any", "m_of_n"]).optional().describe(
+    "Optional new barrier join policy ('all', 'any', 'm_of_n').",
+  ),
+  joinThreshold: z.number().int().positive().optional().describe(
+    "Optional new threshold count of satisfied inbound edges when joinPolicy is 'm_of_n'.",
+  ),
   config: z.record(z.unknown()).optional().describe(
-    "Optional configuration object updates. For decision nodes, must include 'options' as an array of string choices. For subworkflow nodes, can update 'childWorkflowId' or 'maxIterations'. For user_interaction nodes, can update 'prompt', 'options', 'allowFreeText', or 'contextHint'.",
+    "Optional configuration object updates. For decision nodes: { field: string, map?: Record<string, string>, numericRules?: Array<{ op, value, condition }>, default: string }. For subworkflow nodes: { childWorkflowId: string }. For user_interaction nodes: { prompt: string, options?: string[] | Record<string, string> }.",
   ),
 }).strict().refine((data) => (data.workflow || data.workflowId) && (data.node || data.nodeId), {
   message: "Workflow ('workflow' or 'workflowId') and node ('node' or 'nodeId') must be provided.",
@@ -33,7 +42,7 @@ const EditNodeSchema = z.object({
 export const editNodeTool = defineTool({
   name: "node_edit",
   description:
-    "Edits an existing node's properties (name, description, runInSubAgent, config) in a workflow. Supports workflow and node UUIDs, exact names, or slugs (e.g. workflow: 'review-workflow/security', node: 'Step 5-web'). Note: Node types cannot be changed after creation, and start node types are fixed.",
+    "Edits an existing node's properties (name, description, runInSubAgent, role, joinPolicy, joinThreshold, config) in a workflow.",
   schema: EditNodeSchema,
   execute: async ({
     workflow,
@@ -43,6 +52,9 @@ export const editNodeTool = defineTool({
     name,
     description,
     runInSubAgent,
+    role,
+    joinPolicy,
+    joinThreshold,
     config,
   }) => {
     const targetWorkflow = workflow ?? workflowId!;
@@ -68,6 +80,9 @@ export const editNodeTool = defineTool({
       name: name !== undefined ? name : existingNode.name,
       description: description !== undefined ? description : existingNode.description,
       runInSubAgent: runInSubAgent !== undefined ? runInSubAgent : existingNode.runInSubAgent,
+      role: role !== undefined ? (role.trim() || undefined) : existingNode.role,
+      joinPolicy: joinPolicy !== undefined ? (joinPolicy as JoinPolicy) : existingNode.joinPolicy,
+      joinThreshold: joinThreshold !== undefined ? joinThreshold : existingNode.joinThreshold,
       config: config !== undefined ? { ...existingNode.config, ...config } : existingNode.config,
       updatedAt: new Date().toISOString(),
     };

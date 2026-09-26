@@ -191,7 +191,7 @@ export function formatWorkflowListMarkdown(
     const typeBadge = isSub ? "📦 *Sub-workflow*" : "🚀 *Standalone*";
     const desc = wf.description ? wf.description.replace(/\|/g, "/") : "-";
     md += `| **${wf.name}** | \`${wf.id}\` | ${typeBadge} | ${desc} | ${
-      wf.updatedAt.slice(0, 10)
+      wf.updatedAt ? wf.updatedAt.slice(0, 10) : "-"
     } |\n`;
   }
   return md;

@@ -1,6 +1,5 @@
 import type { JSX, VNode } from "preact";
 import { Badge, type TaskPriorityVariant, type TaskStatusVariant } from "../components/index.ts";
-import type { TaskPipeline } from "../../store/types.ts";
 
 export interface TaskCardItem {
   id: string;
@@ -13,13 +12,18 @@ export interface TaskCardItem {
   assignee?: string;
   context?: string;
   workflowId?: string;
+  originWorkflowId?: string;
+  originExecutionId?: string;
+  originNodeId?: string;
+  assignedWorkflowId?: string;
+  activeExecutionId?: string;
+  rejectionCount?: number;
   parentTaskId?: string;
   comments?: Array<{ id?: string; author?: string; content?: string; createdAt?: string }> | number;
   blockedBy?: Array<string | { fromTaskId: string }>;
   blocking?: Array<string | { toTaskId: string }>;
   isBlocked?: boolean;
   isReady?: boolean;
-  pipeline?: TaskPipeline;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -44,7 +48,7 @@ const TYPE_BADGE_STYLES: Record<string, string> = {
 
 /**
  * TaskCard renders an interactive, draggable Kanban card element with metadata,
- * role tag, priority badge, blocked/frontier status, and click handler.
+ * role tag, priority badge, subworkflow pill, rejection badge, blocked/frontier status, and click handler.
  */
 export function TaskCard({
   task,
@@ -105,6 +109,13 @@ export function TaskCard({
     }
   };
 
+  const hasSubworkflow = Boolean(task.assignedWorkflowId);
+  const subworkflowUrl = task.assignedWorkflowId
+    ? `/visualize/${encodeURIComponent(task.assignedWorkflowId)}${
+      task.activeExecutionId ? `?executionId=${encodeURIComponent(task.activeExecutionId)}` : ""
+    }`
+    : "#";
+
   return (
     <div
       id={`card-${task.id}`}
@@ -158,6 +169,17 @@ export function TaskCard({
             </span>
           )}
 
+          {/* Rejection Count Badge */}
+          {task.rejectionCount !== undefined && task.rejectionCount > 0 && (
+            <span
+              class="badge inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-rose-950/80 text-rose-300 border border-rose-800/70"
+              title={`${task.rejectionCount} review rejection cycles`}
+            >
+              <span>⚠️</span>
+              <span>{task.rejectionCount} REJ</span>
+            </span>
+          )}
+
           {/* Type Badge */}
           <span
             class={`badge ${typeBadgeClass} px-1.5 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase`}
@@ -187,8 +209,8 @@ export function TaskCard({
         </p>
       )}
 
-      {/* Role Tag & Pipeline Stage Preview */}
-      {(task.role || task.pipeline) && (
+      {/* Role Tag & Assigned Subworkflow Pill */}
+      {(task.role || hasSubworkflow) && (
         <div class="flex items-center gap-1.5 flex-wrap text-xs">
           {task.role && (
             <span
@@ -199,15 +221,34 @@ export function TaskCard({
               <span>@{task.role}</span>
             </span>
           )}
-          {task.pipeline && task.pipeline.currentStageId && (
+          {hasSubworkflow && (
             <span
-              class="inline-flex items-center gap-1 font-mono text-[10px] text-purple-300 bg-purple-950/60 border border-purple-800/60 px-1.5 py-0.5 rounded"
-              title={`Pipeline stage: ${task.pipeline.currentStageId}`}
+              class="inline-flex items-center gap-1 font-mono text-[10px] text-purple-300 bg-purple-950/60 border border-purple-800/60 px-2 py-0.5 rounded"
+              title={`Assigned subworkflow: ${task.assignedWorkflowId}`}
             >
-              <span>⚡</span>
-              <span>stage: {task.pipeline.currentStageId}</span>
+              <span>📦</span>
+              <span class="truncate max-w-[130px]">{task.assignedWorkflowId}</span>
             </span>
           )}
+        </div>
+      )}
+
+      {/* Subworkflow Action Button */}
+      {hasSubworkflow && (
+        <div class="flex items-center pt-0.5">
+          <a
+            href={subworkflowUrl}
+            class="open-subworkflow-btn w-full inline-flex items-center justify-center gap-1.5 text-[11px] font-semibold text-purple-300 hover:text-white bg-purple-950/60 hover:bg-purple-900/80 border border-purple-800/70 hover:border-purple-600 px-2.5 py-1 rounded-md transition-colors no-underline"
+            onClick={(e) => e.stopPropagation()}
+            title="Open Subworkflow in Visualizer"
+          >
+            <span>🔍 Open Subworkflow</span>
+            {task.activeExecutionId && (
+              <span class="text-[9px] text-purple-400 font-mono">
+                (run active)
+              </span>
+            )}
+          </a>
         </div>
       )}
 
