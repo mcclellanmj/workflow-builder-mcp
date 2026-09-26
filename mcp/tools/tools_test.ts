@@ -194,6 +194,7 @@ Deno.test("Subworkflow reference indexing and batched execution lookups", async 
         id: `exec-${i}`,
         workflowId: parentWf.id,
         status: "completed",
+        context: {},
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         nodeStates: {},

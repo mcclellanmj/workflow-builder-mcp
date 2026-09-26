@@ -108,7 +108,29 @@ deployctl deploy --project=workflow-mcp --entrypoint=http_server.ts
 | `GOOGLE_CLIENT_ID`     | (Optional) Google OAuth Client ID.                                     |
 | `GOOGLE_CLIENT_SECRET` | (Optional) Google OAuth Client Secret.                                 |
 
+### 3. Safe Database Reset (Remote Deno Deploy KV)
+
+If your Deno Deploy project shares a KV database with other applications, you can safely reset all `workflow-builder-mcp` data without affecting other apps.
+
+The reset script operates with **strict namespace isolation**—it only deletes keys belonging to `workflow-builder-mcp` (`workflows`, `executions`, `messages`, `tasks`, `memories`, `roles`, etc.) and completely ignores keys belonging to other applications.
+
+To run the safe reset against your remote Deno Deploy KV:
+
+1. Obtain your **Database URL** from your Deno Deploy project dashboard under the **KV** tab (looks like `https://api.deno.com/databases/<database_id>/connect`).
+2. Generate an access token at [dash.deno.com/user/access-tokens](https://dash.deno.com/user/access-tokens).
+3. Run the reset command from your local terminal:
+
+```bash
+# On Linux / macOS
+DENO_KV_ACCESS_TOKEN="your_access_token" deno task reset:kv "https://api.deno.com/databases/<database_id>/connect"
+
+# On Windows (PowerShell)
+$env:DENO_KV_ACCESS_TOKEN = "your_access_token"
+deno task reset:kv "https://api.deno.com/databases/<database_id>/connect"
+```
+
 ---
+
 
 ## Client Configuration
 

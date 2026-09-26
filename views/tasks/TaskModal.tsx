@@ -1,10 +1,8 @@
 import type { JSX, VNode } from "preact";
 import { Badge, Button, Input } from "../components/index.ts";
-import { PipelineProgress } from "./PipelineProgress.tsx";
 import type {
   Task,
   TaskComment,
-  TaskPipeline,
   TaskPriority,
   TaskStatus,
   TaskType,
@@ -23,9 +21,14 @@ export interface TaskModalItem extends Omit<Partial<Task>, "status" | "priority"
   role?: string;
   assignee?: string;
   workflowId?: string;
+  originWorkflowId?: string;
+  originExecutionId?: string;
+  originNodeId?: string;
+  assignedWorkflowId?: string;
+  activeExecutionId?: string;
+  rejectionCount?: number;
   parentTaskId?: string;
   comments?: TaskComment[];
-  pipeline?: TaskPipeline;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -127,6 +130,7 @@ export function TaskModal({
       const roleEl = document.getElementById("newRole") as HTMLInputElement | null;
       const assigneeEl = document.getElementById("newAssignee") as HTMLInputElement | null;
       const parentEl = document.getElementById("newParentTaskId") as HTMLInputElement | null;
+      const assignedWfEl = document.getElementById("newAssignedWorkflowId") as HTMLInputElement | null;
 
       if (!titleEl || !titleEl.value.trim()) return;
 
@@ -138,6 +142,7 @@ export function TaskModal({
         role: roleEl ? roleEl.value.trim() : undefined,
         assignee: assigneeEl ? assigneeEl.value.trim() : undefined,
         parentTaskId: parentEl ? parentEl.value.trim() : undefined,
+        assignedWorkflowId: assignedWfEl ? assignedWfEl.value.trim() : undefined,
       };
 
       if (onCreate) {
@@ -261,6 +266,14 @@ export function TaskModal({
                 placeholder="e.g. tk-000000"
                 defaultValue={task?.parentTaskId || ""}
               />
+
+              {/* Assigned Subworkflow ID */}
+              <Input
+                label="Assigned Subworkflow ID (Optional)"
+                id="newAssignedWorkflowId"
+                placeholder="e.g. wf-review-flow"
+                defaultValue={task?.assignedWorkflowId || ""}
+              />
             </div>
 
             {/* Footer */}
@@ -301,6 +314,8 @@ export function TaskModal({
     const roleEl = document.getElementById("detailRole") as HTMLInputElement | null;
     const workflowIdEl = document.getElementById("detailWorkflowId") as HTMLInputElement | null;
     const parentIdEl = document.getElementById("detailParentTaskId") as HTMLInputElement | null;
+    const assignedWfEl = document.getElementById("detailAssignedWorkflowId") as HTMLInputElement | null;
+    const activeExecEl = document.getElementById("detailActiveExecutionId") as HTMLInputElement | null;
 
     onSave({
       ...task,
@@ -314,6 +329,8 @@ export function TaskModal({
       role: roleEl ? roleEl.value.trim() : task.role,
       workflowId: workflowIdEl ? workflowIdEl.value.trim() : task.workflowId,
       parentTaskId: parentIdEl ? parentIdEl.value.trim() : task.parentTaskId,
+      assignedWorkflowId: assignedWfEl ? assignedWfEl.value.trim() : task.assignedWorkflowId,
+      activeExecutionId: activeExecEl ? activeExecEl.value.trim() : task.activeExecutionId,
     });
   };
 
@@ -366,7 +383,7 @@ export function TaskModal({
       >
         {/* Modal Header */}
         <div class="modal-header flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-gray-900/80">
-          <div class="flex items-center gap-2.5">
+          <div class="flex items-center gap-2.5 flex-wrap">
             <span
               id="detailTaskId"
               class="task-id font-mono text-sm font-bold text-sky-400 bg-sky-950/60 border border-sky-800/60 px-2 py-0.5 rounded"
@@ -379,17 +396,52 @@ export function TaskModal({
             >
               {rawType}
             </span>
+            {task?.rejectionCount !== undefined && task.rejectionCount > 0 && (
+              <span
+                class="badge inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800/70 uppercase"
+                title={`${task.rejectionCount} review rejection cycles`}
+              >
+                <span>⚠️</span>
+                <span>{task.rejectionCount} Rejections</span>
+              </span>
+            )}
+            {task?.assignedWorkflowId && (
+              <span
+                class="badge inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-800/70 font-mono"
+              >
+                <span>📦</span>
+                <span>subworkflow: {task.assignedWorkflowId}</span>
+              </span>
+            )}
           </div>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            aria-label="Close dialog"
-            class="text-gray-400 hover:text-white p-1"
-          >
-            ✕
-          </Button>
+          <div class="flex items-center gap-2">
+            {task?.assignedWorkflowId && (
+              <a
+                href={`/visualize/${encodeURIComponent(task.assignedWorkflowId)}${
+                  task.activeExecutionId ? `?executionId=${encodeURIComponent(task.activeExecutionId)}` : ""
+                }`}
+                class="open-subworkflow-btn inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-purple-700 hover:bg-purple-600 text-white shadow-md transition-colors no-underline cursor-pointer"
+                title="Open Subworkflow in Visualizer"
+              >
+                <span>🔍 Open Subworkflow</span>
+                {task.activeExecutionId && (
+                  <span class="text-[10px] text-purple-200 font-mono">
+                    (run active)
+                  </span>
+                )}
+              </a>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              aria-label="Close dialog"
+              class="text-gray-400 hover:text-white p-1"
+            >
+              ✕
+            </Button>
+          </div>
         </div>
 
         {/* Modal Body: Two-Column Responsive Layout */}
@@ -437,47 +489,16 @@ export function TaskModal({
               />
             </div>
 
-            {/* Multi-stage Pipeline Progress (if available) */}
-            {task?.pipeline && (
-              <div class="mt-2">
-                <PipelineProgress pipeline={task.pipeline} />
-              </div>
-            )}
-
-            {/* Context & Role Journal Section */}
+            {/* Working Context & Architecture Memories Section */}
             <div id="taskContextSection" class="context-section mt-3 pt-4 border-t border-gray-800">
               <h4 class="context-section-title text-xs font-bold uppercase tracking-wider text-sky-400 flex items-center gap-1.5 mb-2.5">
                 <span>🧠</span>
                 <span>Context &amp; Role Journal</span>
               </h4>
-
-              <div
-                id="taskRoleJournalContainer"
-                class="rounded-lg bg-gray-950 border border-gray-800/80 p-3 text-xs"
-              >
-                {task?.role
-                  ? (
-                    <div class="context-journal-card flex flex-col gap-1.5">
-                      <div class="context-journal-header flex items-center justify-between text-gray-400 text-[11px] pb-1 border-b border-gray-800">
-                        <span>
-                          <strong>📖 Role Journal:</strong> @{task.role}
-                        </span>
-                        <span>Active</span>
-                      </div>
-                      <p class="text-gray-300 italic font-mono text-xs pt-1">
-                        Role journal synchronized for role @{task.role}.
-                      </p>
-                    </div>
-                  )
-                  : (
-                    <p class="text-gray-500 text-xs">
-                      Assign a <code>role</code> to view connected working journals and memories.
-                    </p>
-                  )}
-              </div>
+              <div id="taskRoleJournalContainer" class="hidden"></div>
 
               {/* Scoped Memories List Container */}
-              <div class="mt-3">
+              <div class="mt-2">
                 <span class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider block mb-1.5">
                   Relevant Memories:
                 </span>
@@ -486,7 +507,7 @@ export function TaskModal({
                   class="context-memories-list flex flex-wrap gap-1.5"
                 >
                   <span class="text-gray-500 text-xs italic">
-                    Memories automatically scoped by role and workflow.
+                    Memories automatically scoped by task, role, and workflow.
                   </span>
                 </div>
               </div>
@@ -735,6 +756,34 @@ export function TaskModal({
               />
             </div>
 
+            {/* Assigned Subworkflow ID */}
+            <div class="form-group flex flex-col gap-1">
+              <label class="font-bold text-gray-400 uppercase tracking-wider text-[11px]">
+                Assigned Subworkflow
+              </label>
+              <input
+                type="text"
+                id="detailAssignedWorkflowId"
+                class="form-control rounded-md bg-gray-900 border border-gray-700 text-gray-100 px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-purple-500"
+                placeholder="e.g. wf-review-subworkflow"
+                defaultValue={task?.assignedWorkflowId || ""}
+              />
+            </div>
+
+            {/* Active Execution ID */}
+            <div class="form-group flex flex-col gap-1">
+              <label class="font-bold text-gray-400 uppercase tracking-wider text-[11px]">
+                Active Run / Execution ID
+              </label>
+              <input
+                type="text"
+                id="detailActiveExecutionId"
+                class="form-control rounded-md bg-gray-900 border border-gray-700 text-gray-100 px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-purple-500"
+                placeholder="e.g. exec-001"
+                defaultValue={task?.activeExecutionId || ""}
+              />
+            </div>
+
             {/* Parent Task ID */}
             <div class="form-group flex flex-col gap-1">
               <label class="font-bold text-gray-400 uppercase tracking-wider text-[11px]">
@@ -748,6 +797,14 @@ export function TaskModal({
                 defaultValue={task?.parentTaskId || ""}
               />
             </div>
+
+            {/* Rejection Cycles (if any) */}
+            {task?.rejectionCount !== undefined && task.rejectionCount > 0 && (
+              <div class="rounded-lg bg-rose-950/60 border border-rose-800/60 p-2.5 text-rose-300">
+                <span class="font-semibold text-[11px] block">⚠️ Review Rejections:</span>
+                <span class="font-mono text-sm font-bold">{task.rejectionCount}</span> cycle(s)
+              </div>
+            )}
 
             {/* Timestamps */}
             <div class="mt-auto pt-3 border-t border-gray-800 text-[10px] text-gray-500 flex flex-col gap-1">

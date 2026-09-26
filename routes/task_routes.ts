@@ -157,8 +157,8 @@ export async function handleTaskRoutes(
         return errorResponse("Batch tasks array is required", 400);
       }
 
-      const batchPipelineTemplateId = typeof body.pipelineTemplateId === "string"
-        ? body.pipelineTemplateId
+      const batchAssignedWorkflowId = typeof body.assignedWorkflowId === "string"
+        ? body.assignedWorkflowId
         : undefined;
       const batchWorkflowId = typeof body.workflowId === "string" ? body.workflowId : undefined;
       const batchExecutionId = typeof body.executionId === "string" ? body.executionId : undefined;
@@ -177,9 +177,9 @@ export async function handleTaskRoutes(
         executionId: typeof t.executionId === "string" ? t.executionId : batchExecutionId,
         nodeId: typeof t.nodeId === "string" ? t.nodeId : undefined,
         context: typeof t.context === "string" ? t.context : undefined,
-        pipelineTemplateId: typeof t.pipelineTemplateId === "string"
-          ? t.pipelineTemplateId
-          : batchPipelineTemplateId,
+        assignedWorkflowId: typeof t.assignedWorkflowId === "string"
+          ? t.assignedWorkflowId
+          : batchAssignedWorkflowId,
       }));
 
       for (const t of taskInputs) {
@@ -220,7 +220,7 @@ export async function handleTaskRoutes(
         executionId: body.executionId,
         nodeId: body.nodeId,
         context: body.context,
-        pipelineTemplateId: body.pipelineTemplateId,
+        assignedWorkflowId: body.assignedWorkflowId,
       }, userId);
 
       return jsonResponse({ task: created }, 201);

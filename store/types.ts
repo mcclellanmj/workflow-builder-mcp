@@ -12,7 +12,16 @@ export type NodeId = string;
 export type EdgeId = string;
 
 /** The runtime status of a node during workflow execution. */
-export type NodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+export type NodeStatus =
+  | "pending"
+  | "running"
+  | "waiting_for_children"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+/** Barrier synchronization policy when a node has multiple incoming edges. */
+export type JoinPolicy = "all" | "any" | "m_of_n";
 
 /** The type of a workflow node. */
 export type NodeType = "start" | "step" | "decision" | "end" | "subworkflow" | "user_interaction";
@@ -53,10 +62,35 @@ export interface LoopConfig {
   maxIterations?: number;
 }
 
+/** Numeric comparison rule for declarative decision nodes. */
+export interface NumericRule {
+  op: "<" | "<=" | ">" | ">=" | "==" | "!=";
+  value: number;
+  condition: string;
+}
+
+/** Configuration for declarative decision nodes. */
+export interface DecisionConfig {
+  /** Field name in (data, context) to evaluate, e.g. "loopCount" or "reviewStatus". */
+  field: string;
+  /** Exact value map for discrete matches, e.g. { "approved": "qa", "rejected": "retry" }. */
+  map?: Record<string, string>;
+  /** Ordered numeric comparison rules. */
+  numericRules?: NumericRule[];
+  /** Default fallback condition if no map or numeric rule matches. */
+  default: string;
+}
+
 /** Record of a single past execution iteration of a node. */
 export interface IterationRecord {
   iteration: number;
   error: string | null;
+  /** Preserves review feedback and rejection notes across iterations. */
+  feedback?: string;
+  /** Changes produced during this iteration. */
+  contextDiff?: Record<string, unknown>;
+  /** Agent / role who executed this iteration. */
+  handledBy?: string;
   completedAt: string;
 }
 
@@ -88,7 +122,13 @@ export interface WorkflowNode {
   description: string;
   /** If true, the orchestrator should spawn a sub-agent for this node. */
   runInSubAgent: boolean;
-  /** Type-specific configuration (e.g. decision options, childWorkflowId). */
+  /** Workflow-scoped role assigned to this step. */
+  role?: string;
+  /** Barrier policy when node has multiple incoming edges (default: "all"). */
+  joinPolicy?: JoinPolicy;
+  /** Threshold count when joinPolicy is "m_of_n". */
+  joinThreshold?: number;
+  /** Type-specific configuration (e.g. decision options, childWorkflowId, DecisionConfig). */
   config: Record<string, unknown>;
   /** Runtime execution status. */
   status: NodeStatus;
@@ -131,7 +171,7 @@ export interface ValidationResult {
 }
 
 // ---------------------------------------------------------------------------
-// Workflow Execution (Run Instance)
+// Workflow Execution (Run Instance) & Message Board
 // ---------------------------------------------------------------------------
 
 /** Unique identifier for a workflow execution (run instance). */
@@ -156,6 +196,23 @@ export interface NodeExecutionState {
   updatedAt: string;
 }
 
+/** An execution message posted to a workflow run's message board. */
+export interface ExecutionMessage {
+  id: string;
+  executionId: ExecutionId;
+  workflowId: WorkflowId;
+  /** Scopes message to a specific task (critical for multi-developer filtering). */
+  taskId?: TaskId;
+  /** Scopes message to a specific step. */
+  nodeId?: NodeId;
+  author: string;
+  role?: string;
+  /** e.g. "review_feedback", "blocker", "architecture", "status", "child_completion". */
+  topic?: string;
+  content: string;
+  createdAt: string;
+}
+
 /**
  * A single workflow run instance, scoped to one execution of a workflow.
  * Multiple executions can run concurrently against the same workflow template.
@@ -171,6 +228,17 @@ export interface WorkflowExecution {
   status: ExecutionStatus;
   /** Per-node runtime state, keyed by node ID. */
   nodeStates: Record<NodeId, NodeExecutionState>;
+  /** Persistent context dictionary updated atomically. */
+  context: Record<string, unknown>;
+
+  // Bidirectional parent execution linkage
+  /** Set if this execution is a subworkflow run. */
+  parentExecutionId?: ExecutionId;
+  /** Set if this execution was created to accomplish a task. */
+  originTaskId?: TaskId;
+  /** Set if this execution was dispatched from a specific parent node. */
+  originNodeId?: NodeId;
+
   /** When this execution was started. */
   createdAt: string;
   /** When this execution was last updated. */
@@ -235,7 +303,7 @@ export interface ViewTicket {
 }
 
 // ---------------------------------------------------------------------------
-// Tasks & Dependencies (Beads)
+// Tasks & Dependencies
 // ---------------------------------------------------------------------------
 
 /** Unique identifier for a task. Hash-based, e.g. "tk-a1b2c3". */
@@ -279,13 +347,22 @@ export interface Task {
   type?: TaskType;
 
   // --- Ownership ---
-  /** Free-form role label. User-defined, e.g. "frontend", "security", "human". */
+  /** Free-form role label. User-defined, e.g. "developer", "reviewer", "qa". */
   role?: string;
   /** Agent or person who claimed this task. */
   assignee?: string;
   claimedAt?: string;
 
-  // --- Workflow linkage ---
+  // --- Origin linkage (where this task came from) ---
+  originWorkflowId?: WorkflowId;
+  originExecutionId?: ExecutionId;
+  originNodeId?: NodeId;
+
+  // --- Subworkflow assignment (subworkflow to be run to accomplish this task) ---
+  assignedWorkflowId?: WorkflowId;
+  activeExecutionId?: ExecutionId;
+
+  // --- Legacy / direct workflow linkage (optional aliases) ---
   workflowId?: WorkflowId;
   executionId?: ExecutionId;
   nodeId?: NodeId;
@@ -298,14 +375,14 @@ export interface Task {
   context?: string;
   /** Approaches that were tried and failed — prevents the next agent from repeating. */
   rejectedApproaches?: string[];
+  /** Track number of review rejections. */
+  rejectionCount?: number;
 
   /** Custom inputs payload passed to the task. */
   inputs?: Record<string, unknown>;
   /** Custom metadata key-values. */
   metadata?: Record<string, unknown>;
 
-  /** Multi-stage pipeline execution state when task is managed by a flow pipeline. */
-  pipeline?: TaskPipeline;
   /** Log of formal acceptance notes from completed stages or final review. */
   acceptanceNotes?: string[];
 
@@ -337,12 +414,14 @@ export interface TaskDependency {
 }
 
 // ---------------------------------------------------------------------------
-// Roles & Role Journals
+// Roles
 // ---------------------------------------------------------------------------
 
-/** A named role that can be assigned to tasks. */
+/** A named role that can be assigned to tasks and workflow steps, scoped to a workflow. */
 export interface Role {
   id: string;
+  /** Required: Roles belong to a specific workflow. */
+  workflowId: WorkflowId;
   userId?: string;
   name: string;
   description?: string;
@@ -365,27 +444,32 @@ export interface RoleJournal {
 // Memory System
 // ---------------------------------------------------------------------------
 
-export type MemoryScope = "workflow" | "node" | "role";
+export type MemoryScope = "workflow" | "node" | "task" | "role" | "global";
 
-/** A persistent memory entry. */
+/** A persistent memory entry scoped to a workflow project and optionally anchored to a node or task. */
 export interface Memory {
   id: string;
   userId?: string;
   key: string;
-  /** Short one-line summary shown in memory_list. */
+  /** Short one-line summary shown in memory listings. */
   summary: string;
-  /** Full content, returned only by memory_recall. */
+  /** Full content, returned by memory recall. */
   content: string;
-  scope: MemoryScope;
-
-  // Scope references (set based on scope)
-  workflowId?: WorkflowId;
+  /** Optional scope for backward compatibility */
+  scope?: MemoryScope;
+  /** Required: Scoped to workflow project. */
+  workflowId: WorkflowId;
+  /** Optional: Anchored to a step when step-specific. */
   nodeId?: NodeId;
+  /** Optional: Anchored to a specific task. */
+  taskId?: TaskId;
+  /** Optional: Scoped to a role (backward compatibility). */
   roleId?: string;
+  /** e.g. ["architecture", "contract", "backend"]. */
+  tags: string[];
 
   // Metadata
   source?: string;
-  tags?: string[];
   embedding?: number[];
   lastAccessed?: string;
   accessCount?: number;
@@ -416,111 +500,13 @@ export interface HandoffRecord {
   taskId: TaskId;
   fromAssignee: string;
   toAssignee?: string;
+  fromRole?: string;
   toRole?: string;
+  action: "advance" | "reject" | "escalate";
   reason: string;
   contextSummary: string;
-  rejectedApproaches: string[];
+  /** Specific feedback items (e.g. review defects). */
+  feedback?: string[];
+  rejectedApproaches?: string[];
   timestamp: string;
 }
-
-// ---------------------------------------------------------------------------
-// Task Pipelines & Flow Templates
-// ---------------------------------------------------------------------------
-
-/** Valid actions for transitioning between stages in a task pipeline. */
-export type StageAction = "advance" | "reject" | "escalate" | "delegate";
-
-/** Status lifecycle of a stage within a task pipeline. */
-export type StageStatus = "pending" | "active" | "completed" | "skipped" | "rejected";
-
-/** Policy dictating how state and history roll back when a stage is rejected. */
-export type RejectionPolicy = "rollback_to_stage" | "restart_stage" | "reset_all_subsequent";
-
-/** Transition rule specifying valid paths out of a pipeline stage. */
-export interface StageTransitionRule {
-  targetStageId: string;
-  action: StageAction;
-  allowedRoles?: string[];
-  requiresReviewApproval?: boolean;
-}
-
-/** A single stage in a multi-stage task pipeline. */
-export interface TaskPipelineStage {
-  id: string;
-  name: string;
-  role: string;
-  description?: string;
-  allowedTransitions: StageTransitionRule[];
-  requiredFields?: string[];
-  validationRules?: {
-    minCommentLength?: number;
-    requireStructuredHandoff?: boolean;
-    requireRejectedApproachesOnReject?: boolean;
-    customGuards?: string[];
-  };
-  status: StageStatus;
-  assignee?: string;
-  startedAt?: string;
-  completedAt?: string;
-}
-
-/** Immutable audit entry recording every transition event in a pipeline. */
-export interface PipelineTransitionAuditRecord {
-  id: string;
-  timestamp: string;
-  fromStageId: string;
-  toStageId: string;
-  fromRole: string;
-  toRole: string;
-  triggeredBy: string;
-  action: StageAction | "skip" | "emergency_override" | "insert_stage";
-  reason: string;
-  structuredNotes?: {
-    contextSummary?: string;
-    acceptanceCriteriaMet?: string[];
-    rejectionReasons?: string[];
-    rejectedApproaches?: string[];
-    managerOverrideJustification?: string;
-  };
-  guardResults?: Array<{ guard: string; passed: boolean; details?: string }>;
-}
-
-/** Multi-stage pipeline state embedded inside a Task. */
-export interface TaskPipeline {
-  templateId?: string;
-  templateVersion?: string;
-  strictMode?: boolean;
-  currentStageId: string;
-  currentStageIndex: number;
-  stages: TaskPipelineStage[];
-  rejectionLoopPolicy?: RejectionPolicy;
-  maxRejectionCycles?: number;
-  rejectionCount?: number;
-  history?: PipelineTransitionAuditRecord[];
-}
-
-/** Reusable template defining a standardized multi-stage workflow pipeline. */
-export interface FlowTemplate {
-  id: string;
-  name: string;
-  description: string;
-  version: string;
-  tags: string[];
-  recommendedRoles: string[];
-  defaultRejectionPolicy: RejectionPolicy;
-  defaultMaxRejections: number;
-  stages: Array<Omit<TaskPipelineStage, "status" | "startedAt" | "completedAt" | "assignee">>;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// ---------------------------------------------------------------------------
-// Pipeline Error Constants
-// ---------------------------------------------------------------------------
-
-export const ERR_PIPELINE_PREMATURE_CLOSE = "ERR_PIPELINE_PREMATURE_CLOSE";
-export const ERR_PIPELINE_STAGE_ROLE_MISMATCH = "ERR_PIPELINE_STAGE_ROLE_MISMATCH";
-export const ERR_PIPELINE_ROLE_MUTATION_RESTRICTED = "ERR_PIPELINE_ROLE_MUTATION_RESTRICTED";
-export const ERR_PIPELINE_INVALID_TRANSITION = "ERR_PIPELINE_INVALID_TRANSITION";
-export const ERR_PIPELINE_REJECTION_LIMIT_EXCEEDED = "ERR_PIPELINE_REJECTION_LIMIT_EXCEEDED";
-export const ERR_PIPELINE_MISSING_MANDATORY_NOTES = "ERR_PIPELINE_MISSING_MANDATORY_NOTES";

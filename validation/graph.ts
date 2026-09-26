@@ -241,10 +241,108 @@ export function validateGraph(
     }
   }
 
-  // --- Decision & User Interaction node option coverage ---
-  for (const dNode of [...graph.decisionNodes, ...graph.userInteractionNodes]) {
+  // --- Decision node declarative config validation ---
+  for (const dNode of graph.decisionNodes) {
+    const config = dNode.config;
+    if (!config || typeof config !== "object") {
+      errors.push(
+        `Decision node "${dNode.name}" (${dNode.id}) requires a configuration object.`,
+      );
+      continue;
+    }
+
+    const field = (config as Record<string, unknown>).field;
+    if (typeof field !== "string" || field.trim() === "") {
+      errors.push(
+        `Decision node "${dNode.name}" (${dNode.id}) requires a non-empty 'field' string in config.`,
+      );
+    }
+
+    const defaultCond = (config as Record<string, unknown>).default;
+    if (typeof defaultCond !== "string" || defaultCond.trim() === "") {
+      errors.push(
+        `Decision node "${dNode.name}" (${dNode.id}) requires a non-empty 'default' string in config.`,
+      );
+    }
+
+    // Collect all target conditions that can be evaluated/returned by this decision node
+    const targetConditions = new Set<string>();
+
+    if (typeof defaultCond === "string" && defaultCond.trim() !== "") {
+      targetConditions.add(defaultCond);
+    }
+
+    const map = (config as Record<string, unknown>).map;
+    if (map !== undefined) {
+      if (typeof map === "object" && map !== null) {
+        for (const [key, val] of Object.entries(map as Record<string, unknown>)) {
+          if (typeof val === "string" && val.trim() !== "") {
+            targetConditions.add(val);
+          } else {
+            errors.push(
+              `Decision node "${dNode.name}" (${dNode.id}) map condition for "${key}" must be a non-empty string.`,
+            );
+          }
+        }
+      } else {
+        errors.push(
+          `Decision node "${dNode.name}" (${dNode.id}) 'map' in config must be an object.`,
+        );
+      }
+    }
+
+    const numericRules = (config as Record<string, unknown>).numericRules;
+    if (numericRules !== undefined) {
+      if (Array.isArray(numericRules)) {
+        for (const rule of numericRules as Record<string, unknown>[]) {
+          if (rule && typeof rule === "object" && typeof rule.condition === "string" && rule.condition.trim() !== "") {
+            targetConditions.add(rule.condition);
+          } else {
+            errors.push(
+              `Decision node "${dNode.name}" (${dNode.id}) numeric rule must have a non-empty 'condition' string.`,
+            );
+          }
+        }
+      } else {
+        errors.push(
+          `Decision node "${dNode.name}" (${dNode.id}) 'numericRules' in config must be an array.`,
+        );
+      }
+    }
+
+    const outbound = graph.outboundEdges.get(dNode.id) ?? [];
+    const outgoingConditions = new Set<string>();
+    for (const edge of outbound) {
+      if (edge.condition) {
+        outgoingConditions.add(edge.condition);
+      }
+    }
+
+    // Verifies that every target condition strictly exists as an outgoing edge condition
+    for (const targetCond of targetConditions) {
+      if (!outgoingConditions.has(targetCond)) {
+        errors.push(
+          `Decision node "${dNode.name}" (${dNode.id}) target condition "${targetCond}" has no matching outgoing edge.`,
+        );
+      }
+    }
+
+    // Warns if any outgoing edge from the decision node is unreachable from the config
+    for (const edge of outbound) {
+      if (!edge.condition || !targetConditions.has(edge.condition)) {
+        warnings.push(
+          `Decision node "${dNode.name}" (${dNode.id}) has outgoing edge ${
+            edge.condition ? `with condition "${edge.condition}"` : `"${edge.id}"`
+          } that is unreachable from config.`,
+        );
+      }
+    }
+  }
+
+  // --- User Interaction node option coverage ---
+  for (const uNode of graph.userInteractionNodes) {
     let options: string[] = [];
-    const cfgOptions = dNode.config?.options;
+    const cfgOptions = uNode.config?.options;
     if (Array.isArray(cfgOptions)) {
       options = cfgOptions.filter((o): o is string => typeof o === "string");
     } else if (typeof cfgOptions === "object" && cfgOptions !== null) {
@@ -254,7 +352,7 @@ export function validateGraph(
       );
     }
 
-    const outbound = graph.outboundEdges.get(dNode.id) ?? [];
+    const outbound = graph.outboundEdges.get(uNode.id) ?? [];
     const coveredConditions = new Set<string>();
     for (const edge of outbound) {
       if (edge.condition) {
@@ -262,12 +360,10 @@ export function validateGraph(
       }
     }
 
-    const nodeTypeName = dNode.type === "user_interaction" ? "User interaction" : "Decision";
-
     for (const option of options) {
       if (!coveredConditions.has(option)) {
         warnings.push(
-          `${nodeTypeName} node "${dNode.name}" has option "${option}" with no matching outbound edge.`,
+          `User interaction node "${uNode.name}" has option "${option}" with no matching outbound edge.`,
         );
       }
     }
@@ -275,7 +371,7 @@ export function validateGraph(
     for (const edge of outbound) {
       if (edge.condition && options.length > 0 && !options.includes(edge.condition)) {
         warnings.push(
-          `${nodeTypeName} node "${dNode.name}" has edge with condition "${edge.condition}" that is not in its options [${
+          `User interaction node "${uNode.name}" has edge with condition "${edge.condition}" that is not in its options [${
             options.join(", ")
           }].`,
         );

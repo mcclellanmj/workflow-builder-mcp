@@ -7,7 +7,6 @@ import { listTasksTool } from "./task_list.ts";
 import { getTaskTool } from "./task_get.ts";
 import { updateTaskTool } from "./task_update.ts";
 import { closeTaskTool } from "./task_close.ts";
-import { readyTasksTool } from "./task_ready.ts";
 import { claimTaskTool } from "./task_claim.ts";
 import { dependTaskTool } from "./task_depend.ts";
 import { commentTaskTool } from "./task_comment.ts";
@@ -202,7 +201,7 @@ Deno.test("Task Tools - Dependencies, Ready Frontier, Claiming, and Cascade Unbl
     assertEquals(parseToolResponse(getC1).task.status, "blocked");
 
     // 3. Compute ready frontier: only taskA should be ready
-    const ready1Res = await readyTasksTool.execute({});
+    const ready1Res = await listTasksTool.execute({ readyOnly: true });
     assert(!ready1Res.isError);
     const ready1Data = parseToolResponse(ready1Res);
     assertEquals(ready1Data.frontierSize, 1);
@@ -254,7 +253,7 @@ Deno.test("Task Tools - Dependencies, Ready Frontier, Claiming, and Cascade Unbl
     assertEquals(parseToolResponse(getC2).task.status, "blocked");
 
     // Check ready frontier now has Task B
-    const ready2Res = await readyTasksTool.execute({});
+    const ready2Res = await listTasksTool.execute({ readyOnly: true });
     const ready2Data = parseToolResponse(ready2Res);
     assertEquals(ready2Data.frontierSize, 1);
     assertEquals(ready2Data.readyTasks[0].id, taskB.id);
@@ -270,7 +269,7 @@ Deno.test("Task Tools - Dependencies, Ready Frontier, Claiming, and Cascade Unbl
     assertEquals(closeBData.unblockedTasks[0].id, taskC.id);
 
     // Check Task C is now open and in ready frontier
-    const ready3Res = await readyTasksTool.execute({});
+    const ready3Res = await listTasksTool.execute({ readyOnly: true });
     const ready3Data = parseToolResponse(ready3Res);
     assertEquals(ready3Data.frontierSize, 1);
     assertEquals(ready3Data.readyTasks[0].id, taskC.id);

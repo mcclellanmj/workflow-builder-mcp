@@ -5,10 +5,14 @@
 import type { ToolCallResponse } from "./registry.ts";
 import { createErrorResponse } from "./registry.ts";
 import { resolveNode, resolveWorkflow } from "./resolvers.ts";
-import { getExecution, listEdges, listNodes } from "../store/kv.ts";
+import { getExecution } from "../store/kv/executions.ts";
+import { listEdges } from "../store/kv/edges.ts";
+import { listNodes } from "../store/kv/nodes.ts";
 import type {
   ExecutionId,
+  JoinPolicy,
   NodeExecutionState,
+  NodeId,
   NodeType,
   Workflow,
   WorkflowEdge,
@@ -132,22 +136,36 @@ export async function requireNode(
 }
 
 /**
- * Validates that a decision node's config contains a valid, non-empty options array of strings.
+ * Validates that a decision node's config contains valid 'field' and 'default' strings.
  */
-export function validateDecisionOptions(
+export function validateDecisionConfig(
   config?: Record<string, unknown>,
 ): ToolCallResponse | null {
-  const options = config?.options;
-  if (
-    !Array.isArray(options) ||
-    options.length === 0 ||
-    !options.every((opt) => typeof opt === "string" && opt.trim().length > 0)
-  ) {
+  if (!config || typeof config !== "object") {
     return createErrorResponse(
-      "Decision nodes require a non-empty 'options' array of strings in config (e.g. config: { options: ['approved', 'rejected'] }).",
+      "Decision nodes require a config object with non-empty 'field' and 'default' strings.",
+    );
+  }
+  const field = config.field;
+  if (typeof field !== "string" || field.trim().length === 0) {
+    return createErrorResponse(
+      "Decision nodes require a non-empty 'field' string in config (e.g. config: { field: 'reviewStatus', default: 'retry' }).",
+    );
+  }
+  const defaultVal = config.default;
+  if (typeof defaultVal !== "string" || defaultVal.trim().length === 0) {
+    return createErrorResponse(
+      "Decision nodes require a non-empty 'default' fallback string in config (e.g. config: { field: 'reviewStatus', default: 'retry' }).",
     );
   }
   return null;
+}
+
+/** Legacy alias for validateDecisionConfig */
+export function validateDecisionOptions(
+  config?: Record<string, unknown>,
+): ToolCallResponse | null {
+  return validateDecisionConfig(config);
 }
 
 /**
@@ -247,7 +265,7 @@ export function validateNodeConfig(
   workflowId?: string,
 ): ToolCallResponse | null {
   if (type === "decision") {
-    return validateDecisionOptions(config);
+    return validateDecisionConfig(config);
   }
   if (type === "subworkflow") {
     return validateSubworkflowConfig(config, workflowId);
@@ -256,6 +274,94 @@ export function validateNodeConfig(
     return validateUserInteractionConfig(config);
   }
   return null;
+}
+
+/**
+ * Resolves the next eligible workflow nodes following the completion of a node.
+ * Inspects outgoing edges matching any condition and verifies barrier synchronization
+ * policies (joinPolicy: "all" | "m_of_n" | "any") on prospective target nodes.
+ *
+ * @param execution The current workflow execution state containing nodeStates.
+ * @param completedNodeId The ID of the node that completed.
+ * @param condition Optional edge condition string (for decision or branched steps).
+ * @param nodes Optional pre-fetched workflow nodes list.
+ * @param edges Optional pre-fetched workflow edges list.
+ * @returns Array of eligible next WorkflowNodes whose join conditions are satisfied.
+ */
+export async function findNextNodes(
+  execution: WorkflowExecution,
+  completedNodeId: NodeId,
+  condition?: string,
+  nodes?: WorkflowNode[],
+  edges?: WorkflowEdge[],
+): Promise<WorkflowNode[]> {
+  const [wfNodes, wfEdges] = await Promise.all([
+    nodes ? Promise.resolve(nodes) : listNodes(execution.workflowId, { userId: execution.userId }),
+    edges ? Promise.resolve(edges) : listEdges(execution.workflowId, { userId: execution.userId }),
+  ]);
+
+  const nodeMap = new Map<string, WorkflowNode>(wfNodes.map((n) => [n.id, n]));
+
+  // If the origin node itself has not completed, no downstream nodes can be activated
+  if (execution.nodeStates[completedNodeId]?.status !== "completed") {
+    return [];
+  }
+
+  // Find candidate outgoing edges from completedNodeId
+  const candidateEdges = wfEdges.filter((edge) => {
+    if (edge.fromNodeId !== completedNodeId) return false;
+    if (condition !== undefined) {
+      return edge.condition === condition;
+    }
+    return !edge.condition;
+  });
+
+  // Distinct candidate target node IDs
+  const targetNodeIds = Array.from(new Set(candidateEdges.map((e) => e.toNodeId)));
+  const nextNodes: WorkflowNode[] = [];
+
+  for (const targetId of targetNodeIds) {
+    const targetNode = nodeMap.get(targetId);
+    if (!targetNode) continue;
+
+    // Fetch all inbound edges to this prospective target node
+    const inboundEdges = wfEdges.filter((e) => e.toNodeId === targetId);
+    const uniqueSourceIds = Array.from(new Set(inboundEdges.map((e) => e.fromNodeId)));
+
+    const policy: JoinPolicy = targetNode.joinPolicy ?? (uniqueSourceIds.length > 1 ? "all" : "any");
+
+    if (policy === "all") {
+      // Every inbound source must have status "completed"
+      const allCompleted = uniqueSourceIds.length > 0 && uniqueSourceIds.every((srcId) => {
+        if (srcId === completedNodeId) return true;
+        return execution.nodeStates[srcId]?.status === "completed";
+      });
+      if (allCompleted) {
+        nextNodes.push(targetNode);
+      }
+    } else if (policy === "m_of_n") {
+      // At least joinThreshold inbound sources must be "completed"
+      const threshold = targetNode.joinThreshold ?? 1;
+      const completedCount = uniqueSourceIds.filter((srcId) => {
+        if (srcId === completedNodeId) return true;
+        return execution.nodeStates[srcId]?.status === "completed";
+      }).length;
+      if (completedCount >= threshold) {
+        nextNodes.push(targetNode);
+      }
+    } else {
+      // "any" policy: at least one inbound source is completed
+      const anyCompleted = uniqueSourceIds.some((srcId) => {
+        if (srcId === completedNodeId) return true;
+        return execution.nodeStates[srcId]?.status === "completed";
+      });
+      if (anyCompleted) {
+        nextNodes.push(targetNode);
+      }
+    }
+  }
+
+  return nextNodes;
 }
 
 /**

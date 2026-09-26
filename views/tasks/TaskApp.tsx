@@ -6,9 +6,7 @@ import type { TaskModalItem, TaskModalMode } from "./TaskModal.tsx";
 import { MemoryVault } from "../memory/MemoryVault.tsx";
 import type { MemoryCardItem, MemoryMetrics } from "../memory/MemoryVault.tsx";
 import { MemoryCard } from "../memory/MemoryCard.tsx";
-import { JournalEntryCard } from "../journal/JournalEntryCard.tsx";
-import type { JournalEntry, RoleItem } from "../journal/JournalView.tsx";
-import { RolesView } from "../roles/RolesView.tsx";
+import { RolesView, type RoleItem } from "../roles/RolesView.tsx";
 
 // Helper to emit raw event handler attributes in SSR without TypeScript JSX type errors
 // deno-lint-ignore no-explicit-any
@@ -28,11 +26,10 @@ export interface TaskAppProps {
   origin?: string;
   userId?: string;
   userName?: string;
-  initialTab?: "tasks" | "memories" | "journals" | "roles" | string;
+  initialTab?: "tasks" | "memories" | "roles" | string;
   tasks?: TaskCardItem[];
   readyTaskIds?: Set<string> | string[];
   memories?: MemoryCardItem[];
-  journalEntries?: JournalEntry[];
   roles?: (RoleItem | string)[];
   availableRoles?: string[];
   metrics?: TaskAppMetrics;
@@ -63,7 +60,6 @@ export function TaskApp({
   tasks = [],
   readyTaskIds = new Set<string>(),
   memories = [],
-  journalEntries = [],
   roles = [],
   availableRoles,
   metrics,
@@ -88,15 +84,12 @@ export function TaskApp({
       const name = typeof r === "string" ? r : r.name;
       if (name) set.add(name);
     }
-    for (const j of journalEntries) {
-      if (j.role) set.add(j.role);
-    }
     return Array.from(set).sort();
   })();
 
   const headerActionText = currentTab === "memories"
     ? "New Memory"
-    : (currentTab === "roles" || currentTab === "journals")
+    : currentTab === "roles"
     ? "New Role"
     : "New Task";
 
@@ -218,9 +211,7 @@ export function TaskApp({
             </a>
             <a
               href="/roles"
-              class={(currentTab === "roles" || currentTab === "journals")
-                ? "nav-tab active"
-                : "nav-tab"}
+              class={currentTab === "roles" ? "nav-tab active" : "nav-tab"}
               id="tab-btn-roles"
               {...rawAttr({ onclick: "switchMainTab('roles', event)" })}
             >
@@ -292,12 +283,11 @@ export function TaskApp({
         <div
           id="rolesView"
           class={`main-view flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 ${
-            (currentTab === "roles" || currentTab === "journals") ? "" : "hidden"
+            currentTab === "roles" ? "" : "hidden"
           }`}
         >
           <RolesView
             roles={roles}
-            entries={journalEntries}
           />
         </div>
       </main>
@@ -343,16 +333,6 @@ export function TaskApp({
             roleId: "developer",
             tags: ["tag"],
             accessCount: 1,
-          }}
-        />
-        <JournalEntryCard
-          entry={{
-            id: "role-anchor",
-            role: "developer",
-            entry: "Journal anchor text",
-            writtenBy: "Dev",
-            updatedAt: new Date().toISOString(),
-            tags: ["tag"],
           }}
         />
       </div>
@@ -687,38 +667,6 @@ export function TaskApp({
               </div>
             </div>
 
-            {/* 2. Current Journal Snapshot */}
-            <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 space-y-3">
-              <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span class="text-sm">📖</span>
-                  <span class="text-xs font-bold uppercase tracking-wider text-gray-400">
-                    Current Journal Snapshot
-                  </span>
-                </div>
-                <div id="roleDetailJournalMeta" class="text-[11px] text-gray-400 font-mono">
-                  -
-                </div>
-              </div>
-
-              <div
-                id="roleDetailJournalText"
-                class="rounded-lg bg-gray-900/90 border border-gray-800 p-3.5 text-xs text-gray-200 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed"
-              >
-                No active journal entry recorded for this role.
-              </div>
-
-              <div class="flex justify-end">
-                <button
-                  type="button"
-                  class="btn btn-secondary px-3 py-1.5 text-xs font-medium rounded bg-gray-800 hover:bg-gray-700 text-gray-200 transition-colors flex items-center gap-1 cursor-pointer"
-                  {...rawAttr({ onclick: "openRoleDetailEditJournal()" })}
-                >
-                  <span>✏️</span>
-                  <span>Edit Journal</span>
-                </button>
-              </div>
-            </div>
 
             {/* 3. Assigned Tasks */}
             <div class="space-y-2">
@@ -845,73 +793,6 @@ export function TaskApp({
         </div>
       </div>
 
-      {/* Edit Role Journal Modal */}
-      <div
-        class="modal-backdrop fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto hidden"
-        id="editJournalModal"
-        {...rawAttr({ onclick: "if(event.target===this) closeEditJournalModal()" })}
-      >
-        <div class="modal relative w-full max-w-xl bg-gray-900 border border-gray-800 rounded-xl shadow-2xl flex flex-col overflow-hidden">
-          <div class="modal-header flex items-center justify-between px-6 py-4 border-b border-gray-800 bg-gray-900/80">
-            <div class="flex items-center gap-2">
-              <span class="badge text-xs font-semibold px-2 py-0.5 rounded uppercase bg-purple-950/60 border border-purple-800/60 text-purple-400">
-                ROLE JOURNAL
-              </span>
-              <h3 id="editJournalRoleTitle" class="text-base font-bold text-gray-100">
-                frontend
-              </h3>
-            </div>
-            <button
-              class="btn btn-secondary btn-sm px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300"
-              {...rawAttr({ onclick: "closeEditJournalModal()" })}
-            >
-              ✕
-            </button>
-          </div>
-
-          <div class="modal-body p-6 space-y-3">
-            <input type="hidden" id="editJournalRoleName" />
-
-            <div class="form-group flex flex-col gap-1">
-              <label class="text-xs font-bold uppercase tracking-wider text-gray-400">
-                Written By (Author)
-              </label>
-              <input
-                type="text"
-                id="editJournalAuthor"
-                class="form-control w-full rounded-md bg-gray-950 border border-gray-700 text-gray-100 px-3 py-1.5 text-sm"
-                defaultValue={safeUserName}
-              />
-            </div>
-
-            <div class="form-group flex flex-col gap-1">
-              <label class="text-xs font-bold uppercase tracking-wider text-gray-400">
-                Journal Entry (Markdown / Progress / Working Handoff)
-              </label>
-              <textarea
-                id="editJournalEntry"
-                class="form-control w-full rounded-md bg-gray-950 border border-gray-700 text-gray-200 font-mono text-xs px-3 py-2 min-h-[160px] resize-y"
-                placeholder="Record decisions, latest state, and instructions for incoming agents..."
-              />
-            </div>
-          </div>
-
-          <div class="modal-footer flex items-center justify-end gap-2 px-6 py-3 border-t border-gray-800 bg-gray-900/80">
-            <button
-              class="btn btn-secondary px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-xs font-medium cursor-pointer"
-              {...rawAttr({ onclick: "closeEditJournalModal()" })}
-            >
-              Cancel
-            </button>
-            <button
-              class="btn px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold cursor-pointer"
-              {...rawAttr({ onclick: "submitJournalUpdate()" })}
-            >
-              Update Journal
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* Toast Notification Banner */}
       <div id="toast" class="toast">

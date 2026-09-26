@@ -118,7 +118,7 @@ export const importWorkflowTool = defineTool({
     }
 
     md +=
-      `\n💡 *Call \`workflow_get\` with workflowId \`${importResult.primaryWorkflowId}\` to inspect nodes or \`workflow_hydrate\` to hydrate into an Epic and begin work.* \n`;
+      `\n💡 *Call \`workflow_get\` with workflowId \`${importResult.primaryWorkflowId}\` to inspect nodes or \`workflow_run_start\` to launch an execution run.* \n`;
 
     return richResponse({
       data: importResult,

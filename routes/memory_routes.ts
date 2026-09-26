@@ -10,7 +10,6 @@ import {
   listMemories,
   listRoles,
   readJournal,
-  readJournals,
   recallMemory,
   saveMemory,
   writeJournal,
@@ -50,6 +49,7 @@ export async function handleMemoryRoutes(
       const scope = (url.searchParams.get("scope") as MemoryScope) || undefined;
       const workflowId = url.searchParams.get("workflowId") || undefined;
       const nodeId = url.searchParams.get("nodeId") || undefined;
+      const taskId = url.searchParams.get("taskId") || undefined;
       const roleId = url.searchParams.get("roleId") || undefined;
       const limitParam = url.searchParams.get("limit");
       const limit = limitParam ? Number(limitParam) : undefined;
@@ -69,10 +69,11 @@ export async function handleMemoryRoutes(
 
       const memories = await listMemories(
         {
-          scope,
           workflowId,
           nodeId,
+          taskId,
           roleId,
+          scope,
           tags,
           limit,
         },
@@ -108,6 +109,7 @@ export async function handleMemoryRoutes(
       if (!body.scope || typeof body.scope !== "string" || !body.scope.trim()) {
         return errorResponse("Memory scope is required", 400);
       }
+      const workflowId = body.workflowId?.trim() || "global";
 
       let tags: string[] | undefined = undefined;
       if (Array.isArray(body.tags)) {
@@ -127,8 +129,9 @@ export async function handleMemoryRoutes(
         summary: body.summary.trim(),
         content,
         scope: body.scope as MemoryScope,
-        workflowId: body.workflowId || undefined,
+        workflowId,
         nodeId: body.nodeId || undefined,
+        taskId: body.taskId || undefined,
         roleId: body.roleId || undefined,
         tags,
         source: body.source || undefined,
@@ -207,18 +210,20 @@ export async function handleMemoryRoutes(
     }
   }
 
-  // 6. GET /api/roles - List all user roles with latest journal
+  // 6. GET /api/roles - List all roles for workflow with latest journal
   if (path === "/api/roles" && method === "GET") {
     try {
-      const roles = await listRoles({ userId });
-
-      const roleNames = roles.map((r) => r.name);
-      const journalsMap = await readJournals(roleNames, userId);
-
-      const enrichedRoles = roles.map((role) => ({
-        ...role,
-        journal: journalsMap.get(role.name) || null,
-      }));
+      const workflowId = url.searchParams.get("workflowId") || "default";
+      const roles = await listRoles({ workflowId, userId });
+      const enrichedRoles = await Promise.all(
+        roles.map(async (role) => {
+          const journal = await readJournal(role.name, userId);
+          return {
+            ...role,
+            journal,
+          };
+        }),
+      );
 
       return jsonResponse({
         count: enrichedRoles.length,
@@ -241,6 +246,10 @@ export async function handleMemoryRoutes(
         return errorResponse("Role name is required", 400);
       }
 
+      const workflowId = typeof body.workflowId === "string" && body.workflowId.trim()
+        ? body.workflowId.trim()
+        : "default";
+
       if (body.description !== undefined && body.description !== null) {
         if (typeof body.description !== "string") {
           return errorResponse("Role description must be a string", 400);
@@ -251,6 +260,7 @@ export async function handleMemoryRoutes(
       }
 
       const role = await createRole({
+        workflowId,
         name: body.name.trim(),
         description: typeof body.description === "string" ? body.description.trim() : undefined,
       }, userId);
@@ -271,6 +281,10 @@ export async function handleMemoryRoutes(
         return errorResponse("Invalid JSON payload", 400);
       }
 
+      const workflowId = typeof body.workflowId === "string" && body.workflowId.trim()
+        ? body.workflowId.trim()
+        : "default";
+
       if (body.description !== undefined && body.description !== null) {
         if (typeof body.description !== "string") {
           return errorResponse("Role description must be a string", 400);
@@ -281,6 +295,7 @@ export async function handleMemoryRoutes(
       }
 
       const role = await createRole({
+        workflowId,
         name: roleName,
         description: typeof body.description === "string" ? body.description.trim() : undefined,
       }, userId);

@@ -6,8 +6,7 @@ import { editNodeTool } from "./edit_node.ts";
 import { getNodeTool } from "./get_node.ts";
 import { getWorkflowTool } from "./get_workflow.ts";
 import { connectNodesTool } from "./connect_nodes.ts";
-import { workflowHydrateTool } from "./hydrate_workflow.ts";
-import { searchWorkflowTool } from "./search_workflow.ts";
+import { listWorkflowsTool } from "./list_workflows.ts";
 import { workflowPatchTool } from "./patch_workflow.ts";
 import { workflowTreeTool } from "./tree_workflow.ts";
 
@@ -120,20 +119,7 @@ Deno.test("Name and Slug Resolution - Eliminating UUID Lookup Overhead", async (
     assertEquals(getNodeData.name, "Step 5-web");
     assertEquals(getNodeData.runInSubAgent, true);
 
-    // 8. Test workflow_hydrate using workflow slug: "review-workflow"
-    const hydrateRes = await workflowHydrateTool.execute({
-      workflow: "review-workflow",
-      format: "json",
-    });
-    assert(!hydrateRes.isError);
-    const hydrateData = JSON.parse(hydrateRes.content[0].text);
-    assertEquals(hydrateData.epic.workflowId, parentWf.id);
-    assertEquals(hydrateData.epics.length, 2); // Root Epic + child Epic
-    assertEquals(hydrateData.summary.totalEpics, 2);
-    assertEquals(hydrateData.summary.totalTasks, 2);
-    assert(hydrateData.readyTasks.length > 0);
-
-    // 10. Test workflow_get with includeSubworkflows: true
+    // 8. Test workflow_get with includeSubworkflows: true
     const getWithSubs = await getWorkflowTool.execute({
       workflow: "review-workflow",
       includeSubworkflows: true,
@@ -148,32 +134,16 @@ Deno.test("Name and Slug Resolution - Eliminating UUID Lookup Overhead", async (
   }
 });
 
-Deno.test("workflow_search - Cross-workflow and node searching with boolean queries", async () => {
+Deno.test("workflow_list - Listing and query search consolidation", async () => {
   const kv = await Deno.openKv(":memory:");
   setKv(kv);
 
   try {
-    // Create workflows with specific security keywords
     const wf1Res = await createWorkflowTool.execute({
       name: "Security Pipeline",
       description: "Pipeline for authentication and authorization",
     });
     const { workflow: wf1 } = JSON.parse(wf1Res.content[0].text);
-
-    await addNodeTool.execute({
-      workflow: wf1.id,
-      type: "step",
-      name: "Passkey Validator",
-      description: "Validates FIDO2 WebAuthn passkey signatures",
-    });
-
-    await addNodeTool.execute({
-      workflow: wf1.id,
-      type: "decision",
-      name: "Risk Gate",
-      description: "Checks for account takeover indicators",
-      config: { options: ["allow", "block"] },
-    });
 
     const wf2Res = await createWorkflowTool.execute({
       name: "Billing Pipeline",
@@ -181,48 +151,34 @@ Deno.test("workflow_search - Cross-workflow and node searching with boolean quer
     });
     const { workflow: wf2 } = JSON.parse(wf2Res.content[0].text);
 
-    await addNodeTool.execute({
-      workflow: wf2.id,
-      type: "step",
-      name: "Invoice Generator",
-      description: "Generates PDF invoices for customers",
-    });
-
-    // 1. Boolean OR search across all workflows: "authentication OR account takeover OR passkey"
-    const searchOrRes = await searchWorkflowTool.execute({
-      query: "authentication OR account takeover OR passkey",
+    // 1. Search by query: "Security"
+    const searchRes = await listWorkflowsTool.execute({
+      query: "Security",
       format: "json",
     });
-    assert(!searchOrRes.isError);
-    const searchOrData = JSON.parse(searchOrRes.content[0].text);
-    assert(searchOrData.totalMatches >= 3);
+    assert(!searchRes.isError);
+    const searchData = JSON.parse(searchRes.content[0].text);
+    assertEquals(searchData.length, 1);
+    assertEquals(searchData[0].id, wf1.id);
 
-    // Verify matched items belong to Security Pipeline
-    const matchWfNames = searchOrData.matches.map((m: { workflowName: string }) => m.workflowName);
-    assert(matchWfNames.includes("Security Pipeline"));
-    assert(!matchWfNames.includes("Billing Pipeline"));
-
-    // 2. Scoped search to specific workflow using slug: "billing-pipeline"
-    const scopedRes = await searchWorkflowTool.execute({
-      query: "invoice",
-      workflow: "billing-pipeline",
+    // 2. Search by description term: "payment"
+    const paymentRes = await listWorkflowsTool.execute({
+      query: "payment",
       format: "json",
     });
-    assert(!scopedRes.isError);
-    const scopedData = JSON.parse(scopedRes.content[0].text);
-    assertEquals(scopedData.totalMatches, 1);
-    assertEquals(scopedData.matches[0].node.name, "Invoice Generator");
+    assert(!paymentRes.isError);
+    const paymentData = JSON.parse(paymentRes.content[0].text);
+    assertEquals(paymentData.length, 1);
+    assertEquals(paymentData[0].id, wf2.id);
 
-    // 3. Type filter search: only decision nodes
-    const typeFilterRes = await searchWorkflowTool.execute({
-      query: "takeover",
-      type: "decision",
+    // 3. List all without query
+    const listAllRes = await listWorkflowsTool.execute({
+      filter: "all",
       format: "json",
     });
-    assert(!typeFilterRes.isError);
-    const typeFilterData = JSON.parse(typeFilterRes.content[0].text);
-    assertEquals(typeFilterData.totalMatches, 1);
-    assertEquals(typeFilterData.matches[0].node.type, "decision");
+    assert(!listAllRes.isError);
+    const allData = JSON.parse(listAllRes.content[0].text);
+    assertEquals(allData.length, 2);
   } finally {
     kv.close();
   }
@@ -252,7 +208,7 @@ Deno.test("workflow_patch - Atomic multi-node batch updates", async () => {
       type: "decision",
       name: "Old Decision",
       description: "Old decision description",
-      config: { options: ["opt1", "opt2"] },
+      config: { field: "opt", default: "opt2", map: { "opt1": "opt1" } },
     });
 
     await addNodeTool.execute({
@@ -275,7 +231,7 @@ Deno.test("workflow_patch - Atomic multi-node batch updates", async () => {
         {
           node: "Old Decision",
           name: "Gating Decision",
-          config: { options: ["approved", "rejected"] },
+          config: { field: "review", default: "rejected", map: { "approved": "approved" } },
         },
         {
           node: "Old Step 2",
@@ -299,7 +255,8 @@ Deno.test("workflow_patch - Atomic multi-node batch updates", async () => {
 
     const node2 = await getNodeTool.execute({ workflow: wf.id, node: "Gating Decision" });
     const node2Data = JSON.parse(node2.content[0].text);
-    assertEquals(node2Data.config.options, ["approved", "rejected"]);
+    assertEquals(node2Data.config.field, "review");
+    assertEquals(node2Data.config.default, "rejected");
 
     const node3 = await getNodeTool.execute({ workflow: wf.id, node: "Aggregation Node" });
     const node3Data = JSON.parse(node3.content[0].text);

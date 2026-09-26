@@ -28,6 +28,7 @@ import { handleStaticRoutes } from "./routes/static_routes.ts";
 import { handleTaskRoutes } from "./routes/task_routes.ts";
 import { handleTokenRoutes } from "./routes/token_routes.ts";
 import { handleVisualizeRoutes } from "./routes/visualize_routes.ts";
+import { checkAndPerformStartupReset } from "./store/kv/admin_reset.ts";
 
 export { getCachedToolDefinitions, processJsonRpcMessage };
 
@@ -48,6 +49,7 @@ for (const tool of allTools) {
  * Main HTTP request router dispatching to dedicated sub-routers.
  */
 export async function handleHttpRequest(req: Request): Promise<Response> {
+  await checkAndPerformStartupReset();
   const start = performance.now();
   const url = new URL(req.url);
   const method = req.method.toUpperCase();
@@ -147,6 +149,7 @@ export async function handleHttpRequest(req: Request): Promise<Response> {
 // Direct Execution Entrypoint
 if (import.meta.main) {
   const port = Number(safeGetEnv("PORT") || 8000);
+  await checkAndPerformStartupReset();
   console.log(`[WORKFLOW_MCP] Starting HTTP serverless instance on port ${port}...`);
   Deno.serve({ port }, handleHttpRequest);
 }

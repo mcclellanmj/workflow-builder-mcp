@@ -10,6 +10,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { safeGetEnv } from "./env.ts";
 import { handleHttpRequest } from "./http_server.ts";
 import { createMcpServer } from "./server.ts";
+import { checkAndPerformStartupReset } from "./store/kv/admin_reset.ts";
 
 const isHttpMode = Deno.args.includes("--http") ||
   Deno.args.includes("--serve") ||
@@ -17,6 +18,7 @@ const isHttpMode = Deno.args.includes("--http") ||
 
 if (isHttpMode) {
   const port = Number(safeGetEnv("PORT") || 8000);
+  await checkAndPerformStartupReset();
   console.error(`[WORKFLOW_MCP] Starting serverless HTTP MCP on port ${port}...`);
   Deno.serve({ port }, handleHttpRequest);
 } else {

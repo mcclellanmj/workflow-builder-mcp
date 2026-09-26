@@ -11,8 +11,6 @@ export type { TaskColumnProps } from "./TaskColumn.tsx";
 export { DEFAULT_KANBAN_COLUMNS, KanbanBoard } from "./KanbanBoard.tsx";
 export type { KanbanBoardProps, KanbanColumnDef } from "./KanbanBoard.tsx";
 
-export { PipelineProgress } from "./PipelineProgress.tsx";
-export type { PipelineProgressProps, PipelineStageItem } from "./PipelineProgress.tsx";
 
 export { TaskModal } from "./TaskModal.tsx";
 export type {

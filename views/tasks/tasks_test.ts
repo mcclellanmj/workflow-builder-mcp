@@ -3,7 +3,6 @@ import { h } from "preact";
 import { renderHtmlResponse } from "../ssr.ts";
 import {
   KanbanBoard,
-  PipelineProgress,
   TaskApp,
   TaskCard,
   TaskColumn,
@@ -114,51 +113,30 @@ Deno.test("KanbanBoard - renders metrics pills, search/filter controls, and swim
   assertStringIncludes(text, "Perform Security Audit");
 });
 
-Deno.test("PipelineProgress - renders multi-stage steps, connectors, and rejection badge", async () => {
-  const vnode = h(PipelineProgress, {
-    pipeline: {
-      templateId: "tpl-code-review",
-      currentStageId: "stage-review",
-      currentStageIndex: 1,
-      rejectionCount: 2,
-      stages: [
-        {
-          id: "stage-dev",
-          name: "Implementation",
-          role: "developer",
-          status: "completed",
-          allowedTransitions: [],
-        },
-        {
-          id: "stage-review",
-          name: "Peer Review",
-          role: "reviewer",
-          status: "active",
-          allowedTransitions: [],
-        },
-        {
-          id: "stage-audit",
-          name: "Security Audit",
-          role: "auditor",
-          status: "pending",
-          allowedTransitions: [],
-        },
-      ],
+Deno.test("TaskCard - renders subworkflow pill, open subworkflow link, and rejection badge", async () => {
+  const vnode = h(TaskCard, {
+    task: {
+      id: "tk-card-subwf",
+      title: "Implement Subworkflow Node",
+      description: "Subworkflow integration task.",
+      status: "in_progress",
+      priority: "high",
+      type: "task",
+      role: "developer",
+      assignedWorkflowId: "wf-sub-456",
+      activeExecutionId: "exec-789",
+      rejectionCount: 3,
     },
   });
 
-  const res = renderHtmlResponse(vnode, { title: "Pipeline Progress Test" });
+  const res = renderHtmlResponse(vnode, { title: "Task Card Subworkflow Test" });
   assertEquals(res.status, 200);
   const text = await res.text();
-  assertStringIncludes(text, "Pipeline Flow");
-  assertStringIncludes(text, "tpl-code-review");
-  assertStringIncludes(text, "Implementation");
-  assertStringIncludes(text, "Peer Review");
-  assertStringIncludes(text, "Security Audit");
-  assertStringIncludes(text, "@developer");
-  assertStringIncludes(text, "@reviewer");
-  assertStringIncludes(text, "@auditor");
-  assertStringIncludes(text, "2 Rejections");
+  assertStringIncludes(text, "tk-card-subwf");
+  assertStringIncludes(text, "wf-sub-456");
+  assertStringIncludes(text, "3 REJ");
+  assertStringIncludes(text, "/visualize/wf-sub-456?executionId=exec-789");
+  assertStringIncludes(text, "Open Subworkflow");
 });
 
 Deno.test("TaskModal - renders create mode with form controls", async () => {

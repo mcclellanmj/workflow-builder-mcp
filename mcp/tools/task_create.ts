@@ -8,7 +8,7 @@ const TaskCreateSchema = z.object({
   title: z.string().min(1).describe("The title or headline of the task."),
   description: z.string().optional().describe("Optional detailed description of the task."),
   role: z.string().optional().describe(
-    "Optional user-defined role label (e.g. 'frontend', 'security-reviewer', 'human'). Auto-registers role if new.",
+    "Optional user-defined role label (e.g. 'frontend', 'security-reviewer', 'qa'). Auto-registers role if new.",
   ),
   priority: z.enum(["critical", "high", "medium", "low"]).optional().describe(
     "Optional task priority level.",
@@ -19,30 +19,39 @@ const TaskCreateSchema = z.object({
   parentTaskId: z.string().optional().describe(
     "Optional parent task ID to nest this task under (creates hierarchical parent-child relation).",
   ),
+  originWorkflowId: z.string().optional().describe(
+    "Optional origin workflow ID where this task was created or dispatched.",
+  ),
+  originExecutionId: z.string().optional().describe(
+    "Optional origin workflow execution run ID.",
+  ),
+  originNodeId: z.string().optional().describe(
+    "Optional origin workflow node ID that dispatched this task.",
+  ),
+  assignedWorkflowId: z.string().optional().describe(
+    "Optional subworkflow ID assigned to accomplish this task.",
+  ),
   workflow: z.string().optional().describe(
-    "Optional workflow ID, name, or slug to link this task to.",
+    "Alias for 'originWorkflowId'.",
   ),
   workflowId: z.string().optional().describe(
-    "Alias for 'workflow'.",
+    "Alias for 'originWorkflowId'.",
   ),
   executionId: z.string().optional().describe(
-    "Optional execution ID to link this task to an active workflow execution run.",
+    "Alias for 'originExecutionId'.",
   ),
   node: z.string().optional().describe(
-    "Optional node ID, name, or slug to link this task to a specific workflow step.",
+    "Alias for 'originNodeId'.",
   ),
   nodeId: z.string().optional().describe(
-    "Alias for 'node'.",
-  ),
-  pipelineTemplateId: z.string().optional().describe(
-    "Optional FlowTemplate ID (e.g. 'unity-dev-playtest-qa', 'code-review-audit', 'hotfix-fast-track', 'research-spec-impl') to initialize a multi-stage pipeline.",
+    "Alias for 'originNodeId'.",
   ),
 });
 
 export const createTaskTool = defineTool({
   name: "task_create",
   description:
-    "Creates a new assignable task (unit of work). Tasks can be standalone or linked to workflows, executions, and nodes. Supports roles, priorities, and parent-child hierarchies.",
+    "Creates a new single assignable task (unit of work). Returns { task: Task }. Tasks can be linked to origin workflows/executions or assigned a subworkflow to execute.",
   schema: TaskCreateSchema,
   execute: async ({
     title,
@@ -51,14 +60,17 @@ export const createTaskTool = defineTool({
     priority,
     type,
     parentTaskId,
+    originWorkflowId,
+    originExecutionId,
+    originNodeId,
+    assignedWorkflowId,
     workflow,
     workflowId,
     executionId,
     node,
     nodeId,
-    pipelineTemplateId,
   }) => {
-    let actualWorkflowId = workflowId ?? workflow;
+    let actualWorkflowId = originWorkflowId ?? workflowId ?? workflow;
     if (actualWorkflowId) {
       const resolvedWf = await resolveWorkflow(actualWorkflowId);
       if (resolvedWf) {
@@ -66,7 +78,7 @@ export const createTaskTool = defineTool({
       }
     }
 
-    let actualNodeId = nodeId ?? node;
+    let actualNodeId = originNodeId ?? nodeId ?? node;
     if (actualNodeId && actualWorkflowId) {
       const nodes = await listNodes(actualWorkflowId);
       const resolvedNode = resolveNode(actualNodeId, nodes);
@@ -83,6 +95,14 @@ export const createTaskTool = defineTool({
       }
     }
 
+    let actualAssignedWorkflowId = assignedWorkflowId;
+    if (actualAssignedWorkflowId) {
+      const resolvedAssignedWf = await resolveWorkflow(actualAssignedWorkflowId);
+      if (resolvedAssignedWf) {
+        actualAssignedWorkflowId = resolvedAssignedWf.id;
+      }
+    }
+
     const task = await createTask({
       title,
       description,
@@ -90,10 +110,13 @@ export const createTaskTool = defineTool({
       priority,
       type,
       parentTaskId: actualParentTaskId,
+      originWorkflowId: actualWorkflowId,
+      originExecutionId: originExecutionId ?? executionId,
+      originNodeId: actualNodeId,
+      assignedWorkflowId: actualAssignedWorkflowId,
       workflowId: actualWorkflowId,
-      executionId,
+      executionId: originExecutionId ?? executionId,
       nodeId: actualNodeId,
-      pipelineTemplateId,
     });
 
     return jsonResponse({ task });

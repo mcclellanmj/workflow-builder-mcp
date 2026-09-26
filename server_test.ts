@@ -18,9 +18,9 @@ Deno.test("McpServer integration test with client over InMemoryTransport", async
       client.connect(clientTransport),
     ]);
 
-    // 1. List tools and verify all 47 tools export rich schema properties
+    // 1. List tools and verify all 41 tools export rich schema properties
     const toolList = await client.listTools();
-    assertEquals(toolList.tools.length, 47, "Expected 47 tools registered");
+    assertEquals(toolList.tools.length, 41, "Expected 41 tools registered");
     const toolNames = toolList.tools.map((t: { name: string }) => t.name);
     assert(toolNames.includes("workflow_create"));
     assert(toolNames.includes("workflow_list"));
@@ -33,18 +33,17 @@ Deno.test("McpServer integration test with client over InMemoryTransport", async
     assert(toolNames.includes("node_list"));
     assert(toolNames.includes("node_connect"));
     assert(toolNames.includes("node_disconnect"));
-    assert(toolNames.includes("workflow_hydrate"));
     assert(toolNames.includes("workflow_validate"));
     assert(toolNames.includes("workflow_visualize"));
-    assert(toolNames.includes("task_ready"));
+    assert(toolNames.includes("workflow_run_start"));
+    assert(toolNames.includes("workflow_run_status"));
+    assert(toolNames.includes("workflow_step_advance"));
+    assert(toolNames.includes("workflow_run_complete"));
+    assert(toolNames.includes("workflow_message_post"));
+    assert(toolNames.includes("workflow_message_read"));
     assert(toolNames.includes("task_claim"));
     assert(toolNames.includes("task_close"));
-    assert(toolNames.includes("pipeline_template_create"));
-    assert(toolNames.includes("pipeline_template_list"));
-    assert(toolNames.includes("pipeline_template_get"));
-    assert(toolNames.includes("task_pipeline_attach"));
-    assert(toolNames.includes("task_pipeline_override"));
-    assert(toolNames.includes("task_pipeline_status"));
+    assert(toolNames.includes("task_handoff"));
     assert(toolNames.includes("memory_save"));
 
     for (const tool of toolList.tools) {

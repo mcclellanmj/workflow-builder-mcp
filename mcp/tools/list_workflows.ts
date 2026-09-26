@@ -4,8 +4,11 @@ import type { Workflow } from "../../store/types.ts";
 import { defineTool, formatWorkflowListMarkdown, richResponse } from "../helpers.ts";
 
 const ListWorkflowsSchema = z.object({
-  filter: z.enum(["standalone", "subworkflows", "all"]).optional().default("standalone").describe(
-    "Filter workflows: 'standalone' (default) returns only top-level workflows intended for independent execution; 'subworkflows' returns internal child workflows; 'all' returns all workflows.",
+  query: z.string().optional().describe(
+    "Optional search query to filter workflows by name or description (consolidates search_workflow).",
+  ),
+  filter: z.enum(["standalone", "subworkflows", "all"]).optional().describe(
+    "Filter workflows: 'standalone' (default when no query) returns only top-level workflows; 'subworkflows' returns internal child workflows; 'all' (default when query is provided) returns all workflows.",
   ),
   limit: z.number().int().positive().optional().describe(
     "Optional maximum number of workflows to return.",
@@ -18,11 +21,13 @@ const ListWorkflowsSchema = z.object({
 export const listWorkflowsTool = defineTool({
   name: "workflow_list",
   description:
-    "Lists workflows with summary information including ID, name, description, type (standalone vs sub-workflow), createdAt, and updatedAt timestamps. Defaults to showing standalone top-level workflows (intended for independent run). Use filter: 'all' or 'subworkflows' to view internal sub-workflows.",
+    "Lists workflows or searches them by query. When query is provided, searches across workflow names and descriptions (consolidating search_workflow). Supports filtering by 'standalone', 'subworkflows', or 'all'.",
   schema: ListWorkflowsSchema,
-  execute: async ({ filter, limit, format }) => {
+  execute: async ({ query, filter, limit, format }) => {
+    const effectiveFilter = filter ?? (query ? "all" : "standalone");
+
     const [allWorkflows, referencedIds] = await Promise.all([
-      listWorkflows(limit !== undefined ? { limit } : undefined),
+      listWorkflows(limit !== undefined && !query ? { limit } : undefined),
       listReferencedChildWorkflowIds(),
     ]);
 
@@ -30,15 +35,29 @@ export const listWorkflowsTool = defineTool({
       wf.intendedForIndependentRun === false ||
       (wf.intendedForIndependentRun !== true && referencedIds.has(wf.id));
 
-    const filtered = allWorkflows.filter((wf) => {
-      if (filter === "subworkflows") {
+    let filtered = allWorkflows.filter((wf) => {
+      if (effectiveFilter === "subworkflows") {
         return isSubworkflow(wf);
       }
-      if (filter === "standalone") {
+      if (effectiveFilter === "standalone") {
         return !isSubworkflow(wf);
       }
       return true; // "all"
     });
+
+    if (query && query.trim()) {
+      const q = query.trim().toLowerCase();
+      const terms = q.split(/\s+/).filter(Boolean);
+      filtered = filtered.filter((wf) => {
+        const nameLower = wf.name.toLowerCase();
+        const descLower = (wf.description || "").toLowerCase();
+        return terms.every((t) => nameLower.includes(t) || descLower.includes(t));
+      });
+    }
+
+    if (limit !== undefined && limit > 0) {
+      filtered = filtered.slice(0, limit);
+    }
 
     const summary = filtered.map((workflow) => ({
       id: workflow.id,

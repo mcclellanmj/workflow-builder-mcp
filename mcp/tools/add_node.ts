@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { listEdges, listNodes, saveNode } from "../../store/kv.ts";
-import type { NodeType, WorkflowNode } from "../../store/types.ts";
+import type { JoinPolicy, NodeType, WorkflowNode } from "../../store/types.ts";
 import { analyzeWorkflowSuggestions } from "../../validation/heuristics.ts";
 import { defineTool, jsonResponse, requireWorkflow, validateNodeConfig } from "../helpers.ts";
 
@@ -26,8 +26,17 @@ const AddNodeSchema = z.object({
   runInSubAgent: z.boolean().optional().describe(
     "Optional. If true, the orchestrator should spawn a sub-agent for executing this node. Defaults to false.",
   ),
+  role: z.string().optional().describe(
+    "Optional workflow-scoped role assigned to this step (e.g. 'developer', 'reviewer', 'qa', 'architect').",
+  ),
+  joinPolicy: z.enum(["all", "any", "m_of_n"]).optional().describe(
+    "Barrier synchronization policy when this node has multiple incoming edges ('all', 'any', 'm_of_n'). Defaults to 'all'.",
+  ),
+  joinThreshold: z.number().int().positive().optional().describe(
+    "Threshold count of satisfied inbound edges when joinPolicy is 'm_of_n'.",
+  ),
   config: z.record(z.unknown()).optional().describe(
-    "Optional configuration object for the node. For decision nodes, must include 'options' as an array of string choices. For subworkflow nodes, must include 'childWorkflowId'. For user_interaction nodes, must include 'prompt' and optional 'options' / 'allowFreeText' / 'contextHint'.",
+    "Optional configuration object for the node. For decision nodes: { field: string, map?: Record<string, string>, numericRules?: Array<{ op, value, condition }>, default: string }. For subworkflow nodes: { childWorkflowId: string }. For user_interaction nodes: { prompt: string, options?: string[] | Record<string, string> }.",
   ),
 }).refine((data) => data.workflow || data.workflowId, {
   message: "Workflow ('workflow' or 'workflowId') must be provided.",
@@ -36,7 +45,7 @@ const AddNodeSchema = z.object({
 export const addNodeTool = defineTool({
   name: "node_add",
   description:
-    "Adds a new node (step, decision, end, subworkflow, or user_interaction) to an existing workflow. Supports workflow UUIDs, exact names, or slugs. Note: 'start' nodes cannot be added manually as they are auto-created with workflows. Decision nodes require config.options containing the list of possible branch outcomes. Subworkflow nodes require config.childWorkflowId. User interaction nodes require config.prompt.",
+    "Adds a new node (step, decision, end, subworkflow, or user_interaction) to an existing workflow. Supports barrier join policies (all, any, m_of_n), role assignments, and declarative decision configurations ({ field, map, numericRules, default }).",
   schema: AddNodeSchema,
   execute: async ({
     workflow,
@@ -45,6 +54,9 @@ export const addNodeTool = defineTool({
     name,
     description,
     runInSubAgent,
+    role,
+    joinPolicy,
+    joinThreshold,
     config,
   }) => {
     const targetWorkflow = workflow ?? workflowId!;
@@ -65,6 +77,9 @@ export const addNodeTool = defineTool({
       name,
       description,
       runInSubAgent: runInSubAgent ?? false,
+      role: role?.trim() || undefined,
+      joinPolicy: joinPolicy as JoinPolicy | undefined,
+      joinThreshold,
       config: nodeConfig,
       status: "pending",
       error: null,

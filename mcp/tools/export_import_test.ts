@@ -256,6 +256,7 @@ Deno.test("Workflow Export & Import - Execution runs restoration", async () => {
       id: executionId,
       workflowId: workflow.id,
       status: "in_progress",
+      context: {},
       nodeStates: {
         [stepNode.id]: {
           nodeId: stepNode.id,

@@ -3,7 +3,7 @@
  */
 
 import { create, insertMultiple, search } from "@orama/orama";
-import type { Memory, MemoryScope } from "./types.ts";
+import type { Memory } from "./types.ts";
 
 export type SearchMode = "hybrid" | "keyword" | "vector";
 
@@ -11,16 +11,19 @@ export interface MemorySearchParams {
   query?: string;
   vector?: number[];
   mode?: SearchMode;
-  scope?: MemoryScope;
-  workflow?: string;
   workflowId?: string;
-  node?: string;
+  workflow?: string;
   nodeId?: string;
-  role?: string;
-  roleId?: string;
+  node?: string;
+  taskId?: string;
+  task?: string;
   tags?: string[];
   limit?: number;
   threshold?: number;
+  // Backward compatibility
+  scope?: string;
+  roleId?: string;
+  role?: string;
 }
 
 export interface MemorySearchHit {
@@ -59,7 +62,8 @@ export function computeMatchedFields(
     .split(/[\s,.;:!?\-_]+/)
     .filter((t) => t.length > 0);
 
-  const checkField = (val: string): boolean => {
+  const checkField = (val?: string): boolean => {
+    if (!val) return false;
     const lower = val.toLowerCase();
     return terms.some((t) => lower.includes(t));
   };
@@ -68,6 +72,9 @@ export function computeMatchedFields(
   if (memory.tags && memory.tags.some((t) => checkField(t))) matched.push("tags");
   if (checkField(memory.summary)) matched.push("summary");
   if (checkField(memory.content)) matched.push("content");
+  if (checkField(memory.workflowId)) matched.push("workflowId");
+  if (checkField(memory.nodeId)) matched.push("nodeId");
+  if (checkField(memory.taskId)) matched.push("taskId");
 
   if ((mode === "hybrid" || mode === "vector") && hasVector) {
     matched.push("embedding");
@@ -92,9 +99,6 @@ export async function searchMemoriesFromKv(
     if (entry.value && typeof entry.value === "object") {
       const m = entry.value;
 
-      // Filter by scope
-      if (params.scope && m.scope !== params.scope) continue;
-
       // Filter by workflow / workflowId
       const targetWorkflow = params.workflowId || params.workflow;
       if (targetWorkflow && m.workflowId !== targetWorkflow) continue;
@@ -103,9 +107,9 @@ export async function searchMemoriesFromKv(
       const targetNode = params.nodeId || params.node;
       if (targetNode && m.nodeId !== targetNode) continue;
 
-      // Filter by role / roleId
-      const targetRole = params.roleId || params.role;
-      if (targetRole && m.roleId !== targetRole) continue;
+      // Filter by task / taskId
+      const targetTask = params.taskId || params.task;
+      if (targetTask && m.taskId !== targetTask) continue;
 
       // Filter by tags
       if (params.tags && params.tags.length > 0) {
@@ -148,10 +152,9 @@ export async function searchMemoriesFromKv(
     summary: "string",
     content: "string",
     tags: "string[]",
-    scope: "string",
     workflowId: "string",
-    roleId: "string",
     nodeId: "string",
+    taskId: "string",
   };
 
   if (vectorDim !== null) {
@@ -169,10 +172,9 @@ export async function searchMemoriesFromKv(
       summary: m.summary,
       content: m.content,
       tags: m.tags || [],
-      scope: m.scope || "",
       workflowId: m.workflowId || "",
-      roleId: m.roleId || "",
       nodeId: m.nodeId || "",
+      taskId: m.taskId || "",
     };
 
     if (vectorDim !== null) {

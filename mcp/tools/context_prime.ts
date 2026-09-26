@@ -1,24 +1,34 @@
 import { z } from "zod";
 import {
   computeReadyFrontier,
+  getExecution,
   getHandoffsForTask,
+  listEdges,
+  listExecutions,
   listMemories,
+  listNodes,
+  listTasks,
   type MemorySummary,
-  readJournal,
   recallMemory,
 } from "../../store/kv.ts";
-import type { HandoffRecord, Memory, RoleJournal, Task } from "../../store/types.ts";
+import type {
+  HandoffRecord,
+  JoinPolicy,
+  Memory,
+  Task,
+  WorkflowExecution,
+} from "../../store/types.ts";
 import { defineTool, jsonResponse, resolveWorkflow } from "../helpers.ts";
 import { resolveTask } from "./task_helpers.ts";
 
 const ContextPrimeSchema = z.object({
   workflow: z.string().optional().describe("Workflow ID, name, or slug to prime context for."),
   workflowId: z.string().optional().describe("Alias for 'workflow'."),
-  executionId: z.string().optional().describe("Active execution ID."),
+  executionId: z.string().optional().describe("Active workflow execution ID."),
   task: z.string().optional().describe("Task ID to prime context for."),
   taskId: z.string().optional().describe("Alias for 'task'."),
   role: z.string().optional().describe(
-    "Role name to prime context for (e.g. 'frontend', 'security-reviewer').",
+    "Role name to prime context for (e.g. 'frontend', 'developer', 'qa', 'architect').",
   ),
   tokenBudget: z.number().int().positive().optional().default(2000).describe(
     "Token budget for formatted context (default 2000 tokens ≈ 8000 characters).",
@@ -28,7 +38,7 @@ const ContextPrimeSchema = z.object({
 export const contextPrimeTool = defineTool({
   name: "context_prime",
   description:
-    "Bootstraps an agent session by gathering role journal, relevant memories (workflow, node, role), active task state, handoff history, and unblocked ready frontier into a compact context package within a specified token budget.",
+    "Bootstraps an agent session by summarizing active workflow executions, barrier-ready nodes, claimed tasks, predecessor handoffs, and workflow-level architecture memories within a token budget.",
   schema: ContextPrimeSchema,
   execute: async (
     { workflow, workflowId, executionId, task, taskId, role, tokenBudget = 2000 },
@@ -39,7 +49,7 @@ export const contextPrimeTool = defineTool({
     let targetRole = role?.trim();
     let targetNodeId: string | undefined;
 
-    // 1. If taskId provided, gather active task details & context
+    // 1. Resolve task details if taskId provided
     let taskRecord: Task | null = null;
     if (targetTaskId) {
       taskRecord = await resolveTask(targetTaskId);
@@ -47,19 +57,19 @@ export const contextPrimeTool = defineTool({
         if (!targetRole && taskRecord.role) {
           targetRole = taskRecord.role;
         }
-        if (!targetWorkflow && taskRecord.workflowId) {
-          targetWorkflow = taskRecord.workflowId;
+        if (!targetWorkflow) {
+          targetWorkflow = taskRecord.originWorkflowId ?? taskRecord.workflowId;
         }
-        if (!targetExecutionId && taskRecord.executionId) {
-          targetExecutionId = taskRecord.executionId;
+        if (!targetExecutionId) {
+          targetExecutionId = taskRecord.originExecutionId ?? taskRecord.executionId;
         }
-        if (taskRecord.nodeId) {
-          targetNodeId = taskRecord.nodeId;
+        if (taskRecord.originNodeId || taskRecord.nodeId) {
+          targetNodeId = taskRecord.originNodeId ?? taskRecord.nodeId;
         }
       }
     }
 
-    // Resolve workflow identifier if provided
+    // Resolve workflow identifier
     let resolvedWfId: string | undefined;
     let workflowName: string | undefined;
     if (targetWorkflow && targetWorkflow.trim()) {
@@ -72,59 +82,126 @@ export const contextPrimeTool = defineTool({
       }
     }
 
-    // 2. Role Journal (if role provided or found on task)
-    let journalRecord: RoleJournal | null = null;
-    let journalLoaded = false;
-    if (targetRole && targetRole.trim()) {
-      journalRecord = await readJournal(targetRole.trim());
-      if (journalRecord) {
-        journalLoaded = true;
-      }
-    }
-
-    // 3. Task handoffs
+    // 2. Task handoffs
     let handoffs: HandoffRecord[] = [];
     if (taskRecord) {
       handoffs = await getHandoffsForTask(taskRecord.id);
     }
     const handoffsLoaded = handoffs.length;
 
-    // 4. Gather candidate memories in parallel
-    const [nodeMems, wfMems, roleMems] = await Promise.all([
-      resolvedWfId && targetNodeId
-        ? listMemories({ workflowId: resolvedWfId, nodeId: targetNodeId })
-        : Promise.resolve([]),
-      resolvedWfId ? listMemories({ workflowId: resolvedWfId }) : Promise.resolve([]),
-      targetRole && targetRole.trim()
-        ? listMemories({ roleId: targetRole.trim() })
-        : Promise.resolve([]),
-    ]);
-
-    const seenMemoryIds = new Set<string>();
-    const candidateSummaries: MemorySummary[] = [];
-
-    for (const m of [...nodeMems, ...wfMems, ...roleMems]) {
-      if (!seenMemoryIds.has(m.id)) {
-        seenMemoryIds.add(m.id);
-        candidateSummaries.push(m);
+    // 3. Active Workflow Executions & Barrier-Ready Nodes
+    const activeExecutions: WorkflowExecution[] = [];
+    if (targetExecutionId) {
+      const exec = await getExecution(targetExecutionId);
+      if (exec) activeExecutions.push(exec);
+    } else if (resolvedWfId) {
+      const execs = await listExecutions(resolvedWfId);
+      for (const e of execs) {
+        if (e.status === "in_progress") {
+          activeExecutions.push(e);
+        }
       }
     }
 
-    // 5. Ready frontier tasks
-    const readyTasks = await computeReadyFrontier({
-      workflowId: resolvedWfId,
-      executionId: targetExecutionId,
-      role: targetRole,
-      limit: 10,
+    // Compute barrier-ready and running nodes across active executions
+    const executionSummaries: Array<{
+      id: string;
+      workflowId: string;
+      runningNodes: string[];
+      barrierReadyNodes: string[];
+    }> = [];
+
+    for (const exec of activeExecutions) {
+      const [nodes, edges] = await Promise.all([
+        listNodes(exec.workflowId),
+        listEdges(exec.workflowId),
+      ]);
+
+      const running: string[] = [];
+      const barrierReady: string[] = [];
+
+      for (const n of nodes) {
+        const state = exec.nodeStates[n.id];
+        if (state?.status === "running") {
+          running.push(n.name ? `${n.name} (${n.id})` : n.id);
+        } else if (!state || state.status === "pending") {
+          // Check barrier dependencies
+          const inbound = edges.filter((e) => e.toNodeId === n.id);
+          if (inbound.length > 0) {
+            const policy: JoinPolicy = n.joinPolicy ?? "all";
+            if (policy === "all") {
+              const allDone = inbound.every(
+                (edge) => exec.nodeStates[edge.fromNodeId]?.status === "completed",
+              );
+              if (allDone) {
+                barrierReady.push(n.name ? `${n.name} (${n.id})` : n.id);
+              }
+            } else if (policy === "m_of_n") {
+              const threshold = n.joinThreshold ?? 1;
+              const count = inbound.filter(
+                (edge) => exec.nodeStates[edge.fromNodeId]?.status === "completed",
+              ).length;
+              if (count >= threshold) {
+                barrierReady.push(n.name ? `${n.name} (${n.id})` : n.id);
+              }
+            }
+          }
+        }
+      }
+
+      executionSummaries.push({
+        id: exec.id,
+        workflowId: exec.workflowId,
+        runningNodes: running,
+        barrierReadyNodes: barrierReady,
+      });
+    }
+
+    // 4. Claimed & Ready Tasks
+    const [claimedTasks, readyTasks] = await Promise.all([
+      listTasks({
+        workflowId: resolvedWfId,
+        executionId: targetExecutionId,
+        role: targetRole,
+        status: "claimed",
+        limit: 10,
+      }),
+      computeReadyFrontier({
+        workflowId: resolvedWfId,
+        executionId: targetExecutionId,
+        role: targetRole,
+        limit: 10,
+      }),
+    ]);
+
+    // 5. Workflow-level Architecture & Step Memories
+    let candidateSummaries: MemorySummary[] = [];
+    if (resolvedWfId) {
+      candidateSummaries = await listMemories({
+        workflowId: resolvedWfId,
+        limit: 20,
+      });
+    }
+
+    // Prioritize architecture memories, then step memories
+    candidateSummaries.sort((a, b) => {
+      const aArch = a.tags.includes("architecture") || a.tags.includes("contract") ? 1 : 0;
+      const bArch = b.tags.includes("architecture") || b.tags.includes("contract") ? 1 : 0;
+      if (aArch !== bArch) return bArch - aArch;
+      if (targetNodeId) {
+        const aNode = a.nodeId === targetNodeId ? 1 : 0;
+        const bNode = b.nodeId === targetNodeId ? 1 : 0;
+        if (aNode !== bNode) return bNode - aNode;
+      }
+      return (b.accessCount ?? 0) - (a.accessCount ?? 0);
     });
 
-    // 6. Assemble Markdown within tokenBudget
+    // Assemble markdown context within tokenBudget
     const maxChars = tokenBudget * 4;
-
     const sections: string[] = ["# 🧭 Session Context Bootstrap\n"];
 
     if (taskRecord) {
-      let taskMd = `## 📌 Active Task: [${taskRecord.id}] ${taskRecord.title}\n`;
+      let taskMd = `## 📌 Current Task: [${taskRecord.id}] ${taskRecord.title}\n`;
       taskMd += `- **Status**: \`${taskRecord.status}\` | **Priority**: \`${
         taskRecord.priority || "medium"
       }\` | **Role**: \`${taskRecord.role || "none"}\`\n`;
@@ -136,6 +213,12 @@ export const contextPrimeTool = defineTool({
           workflowName ? `**${workflowName}** (\`${resolvedWfId}\`)` : `\`${resolvedWfId}\``
         }${targetNodeId ? ` | **Node**: \`${targetNodeId}\`` : ""}\n`;
       }
+      if (taskRecord.assignedWorkflowId) {
+        taskMd += `- **Assigned Subworkflow**: \`${taskRecord.assignedWorkflowId}\`\n`;
+      }
+      if (taskRecord.rejectionCount && taskRecord.rejectionCount > 0) {
+        taskMd += `- **Rejection Count**: ${taskRecord.rejectionCount}\n`;
+      }
       if (taskRecord.description) {
         taskMd += `> ${taskRecord.description}\n`;
       }
@@ -143,7 +226,7 @@ export const contextPrimeTool = defineTool({
         taskMd += `\n### 📝 Accumulated Working Context\n${taskRecord.context.trim()}\n`;
       }
       if (taskRecord.rejectedApproaches && taskRecord.rejectedApproaches.length > 0) {
-        taskMd += `\n### ⚠️ Rejected Approaches (Avoid Repeating)\n`;
+        taskMd += `\n### ⚠️ Rejected Approaches (Do Not Repeat)\n`;
         for (const ra of taskRecord.rejectedApproaches) {
           taskMd += `- ❌ ${ra}\n`;
         }
@@ -157,36 +240,59 @@ export const contextPrimeTool = defineTool({
         const toDest = h.toAssignee
           ? `agent \`${h.toAssignee}\``
           : (h.toRole ? `role \`${h.toRole}\`` : "queue");
-        handoffMd += `- **${h.timestamp.slice(0, 19)}**: from \`${h.fromAssignee}\` ➔ ${toDest}\n`;
+        handoffMd += `- **${h.timestamp.slice(0, 19)}**: [${h.action.toUpperCase()}] from \`${h.fromAssignee}\` ➔ ${toDest}\n`;
         handoffMd += `  - *Reason*: ${h.reason}\n`;
         if (h.contextSummary) {
           handoffMd += `  - *Context*: ${h.contextSummary}\n`;
         }
-        if (h.rejectedApproaches && h.rejectedApproaches.length > 0) {
-          handoffMd += `  - *Rejected*: ${h.rejectedApproaches.join(", ")}\n`;
+        if (h.feedback && h.feedback.length > 0) {
+          handoffMd += `  - *Feedback*: ${h.feedback.join("; ")}\n`;
         }
       }
       sections.push(handoffMd);
     }
 
-    if (journalRecord) {
-      let journalMd = `## 📖 Role Journal: \`${journalRecord.roleId}\`\n`;
-      const author = journalRecord.writtenBy ? `by \`${journalRecord.writtenBy}\` ` : "";
-      journalMd += `> *Last updated ${author}at ${journalRecord.writtenAt}*\n\n`;
-      journalMd += `${journalRecord.entry}\n`;
-      sections.push(journalMd);
+    if (executionSummaries.length > 0) {
+      let execMd = `## ⚙️ Active Workflow Executions (${executionSummaries.length})\n`;
+      for (const ex of executionSummaries) {
+        execMd += `- **Run**: \`${ex.id}\` (Workflow: \`${ex.workflowId}\`)\n`;
+        if (ex.runningNodes.length > 0) {
+          execMd += `  - **Running Steps**: ${ex.runningNodes.join(", ")}\n`;
+        }
+        if (ex.barrierReadyNodes.length > 0) {
+          execMd += `  - **Barrier-Ready Steps (Unblocked)**: ${ex.barrierReadyNodes.join(", ")}\n`;
+        }
+      }
+      sections.push(execMd);
     }
 
-    // Now recall memories that fit in the remaining budget
+    if (claimedTasks.length > 0) {
+      let claimedMd = `## 📋 Claimed Tasks In Progress (${claimedTasks.length})\n`;
+      for (const t of claimedTasks.slice(0, 5)) {
+        const assigneeStr = t.assignee ? ` [assignee: ${t.assignee}]` : "";
+        claimedMd += `- **\`${t.id}\`**: ${t.title} (\`${t.role || "no role"}\`)${assigneeStr}\n`;
+      }
+      sections.push(claimedMd);
+    }
+
+    if (readyTasks.length > 0) {
+      let frontierMd = `## 🚀 Ready Frontier (${readyTasks.length} task(s) unblocked)\n`;
+      for (const t of readyTasks.slice(0, 5)) {
+        const roleLabel = t.role ? `[role: ${t.role}]` : "[any role]";
+        frontierMd += `- **\`${t.id}\`**: ${t.title} ${roleLabel}\n`;
+      }
+      sections.push(frontierMd);
+    }
+
+    // Recall top memories fitting in remaining budget
     const currentLength = sections.reduce((sum, s) => sum + s.length, 0);
-    // Reserve ~400 chars for ready frontier and formatting
-    const memoryCharBudget = Math.max(0, maxChars - currentLength - 400);
+    const memoryCharBudget = Math.max(0, maxChars - currentLength - 200);
 
     const loadedMemories: Memory[] = [];
     let memoryCharsUsed = 0;
 
     const recalledMemories = await Promise.all(
-      candidateSummaries.map((summary) =>
+      candidateSummaries.slice(0, 5).map((summary) =>
         recallMemory({
           id: summary.id,
           taskId: taskRecord?.id,
@@ -201,7 +307,7 @@ export const contextPrimeTool = defineTool({
       if (memoryCharsUsed >= memoryCharBudget) break;
 
       const memSnippet =
-        `### [${recalled.scope.toUpperCase()}] ${recalled.key}\n> ${recalled.summary}\n\n${recalled.content}\n\n`;
+        `### [${recalled.key}] ${recalled.summary}\n${recalled.content}\n\n`;
       if (
         memoryCharsUsed + memSnippet.length <= memoryCharBudget || loadedMemories.length === 0
       ) {
@@ -213,22 +319,12 @@ export const contextPrimeTool = defineTool({
     }
 
     if (loadedMemories.length > 0) {
-      let memSectionMd = `## 🧠 Recalled Memories (${loadedMemories.length})\n\n`;
+      let memSectionMd = `## 🧠 Architecture & Project Memories (${loadedMemories.length})\n\n`;
       for (const m of loadedMemories) {
-        memSectionMd +=
-          `### [${m.scope.toUpperCase()}] ${m.key}\n> ${m.summary}\n\n${m.content}\n\n`;
+        const anchor = m.nodeId ? ` (Step: \`${m.nodeId}\`)` : (m.taskId ? ` (Task: \`${m.taskId}\`)` : "");
+        memSectionMd += `### **${m.key}**${anchor}\n> ${m.summary}\n\n${m.content}\n\n`;
       }
       sections.push(memSectionMd);
-    }
-
-    if (readyTasks.length > 0) {
-      let frontierMd = `## 🚀 Ready Frontier (${readyTasks.length} task(s) unblocked)\n`;
-      for (const t of readyTasks.slice(0, 5)) {
-        const roleLabel = t.role ? `[role: ${t.role}]` : "[any role]";
-        const prioLabel = t.priority ? `(${t.priority})` : "";
-        frontierMd += `- **\`${t.id}\`**: ${t.title} \`${t.status}\` ${roleLabel} ${prioLabel}\n`;
-      }
-      sections.push(frontierMd);
     }
 
     let fullContext = sections.join("\n").trim();
@@ -240,7 +336,8 @@ export const contextPrimeTool = defineTool({
       context: fullContext,
       memoriesLoaded: loadedMemories.length,
       handoffsLoaded,
-      journalLoaded,
+      activeExecutionsCount: activeExecutions.length,
+      readyTasksCount: readyTasks.length,
     });
   },
 });

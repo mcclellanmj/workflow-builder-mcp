@@ -40,6 +40,7 @@
     "test:coverage": "deno test --unstable-kv --allow-read --allow-write --allow-env --allow-net --coverage=cov_profile && deno coverage cov_profile",
     "coverage:html": "deno coverage --html cov_profile",
     "fmt": "deno fmt",
+    "reset:kv": "deno run --unstable-kv --allow-read --allow-write --allow-env --allow-net scripts/reset_kv.ts",
     "check": "deno check main.ts http_server.ts && deno lint && deno fmt --check"
   },
   "imports": {

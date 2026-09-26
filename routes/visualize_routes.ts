@@ -13,8 +13,9 @@ import {
   exportWorkflowBundle,
   getExecution,
   getViewTicket,
+  listMessages,
 } from "../store/kv.ts";
-import type { ViewTicket } from "../store/types.ts";
+import type { ExecutionMessage, ViewTicket } from "../store/types.ts";
 import { hydrateNodesWithExecution } from "../mcp/helpers.ts";
 import { BaseLayout } from "../views/layouts/BaseLayout.tsx";
 import { renderHtmlResponse } from "../views/ssr.ts";
@@ -198,12 +199,14 @@ export async function handleVisualizeRoutes(
     return errorResponse(`Workflow "${workflowId}" was not found.`, 404);
   }
 
-  // Hydrate execution if active
+  // Hydrate execution and messages if active
+  let messages: ExecutionMessage[] = [];
   if (activeExecutionId) {
     const exec = await getExecution(activeExecutionId, resolvedUserId!);
     if (exec) {
       bundle.workflow.nodes = hydrateNodesWithExecution(bundle.workflow.nodes, exec);
     }
+    messages = await listMessages(activeExecutionId, { includeSubworkflows: true });
   }
 
   // Return API Data for Polling
@@ -212,6 +215,7 @@ export async function handleVisualizeRoutes(
       workflow: bundle.workflow,
       subworkflows: bundle.subworkflows,
       activeExecutionId,
+      messages,
     });
   }
 
@@ -222,6 +226,7 @@ export async function handleVisualizeRoutes(
     viewTicket: resolvedTicket,
     serverOrigin: url.origin,
     isStandaloneFile: false,
+    messages,
   });
 
   return new Response(html, {

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { recallMemory } from "../../store/kv.ts";
-import type { MemoryScope } from "../../store/types.ts";
 import {
   createErrorResponse,
   defineTool,
@@ -11,11 +10,8 @@ import {
 
 const MemoryRecallSchema = z.object({
   key: z.string().min(1).describe("The lookup key of the memory to recall."),
-  scope: z.enum(["workflow", "node", "role"]).optional().describe(
-    "Optional scope level to disambiguate keys across scopes.",
-  ),
   workflow: z.string().min(1).optional().describe(
-    "Workflow UUID, name, or slug (if workflow- or node-scoped).",
+    "Workflow UUID, name, or slug.",
   ),
   workflowId: z.string().min(1).optional().describe(
     "Alias for 'workflow'.",
@@ -26,11 +22,8 @@ const MemoryRecallSchema = z.object({
   nodeId: z.string().min(1).optional().describe(
     "Alias for 'node'.",
   ),
-  role: z.string().min(1).optional().describe(
-    "Role name or ID (if role-scoped).",
-  ),
-  roleId: z.string().min(1).optional().describe(
-    "Alias for 'role'.",
+  id: z.string().optional().describe(
+    "Direct memory ID to recall.",
   ),
   accessedBy: z.string().optional().describe(
     "Agent ID, role, or user recalling the memory (logged for access audit).",
@@ -46,17 +39,15 @@ const MemoryRecallSchema = z.object({
 export const memoryRecallTool = defineTool({
   name: "memory_recall",
   description:
-    "Recalls full content of a persistent memory by key. Automatically logs the access event into MemoryAccessRecord for audit and liveness tracking.",
+    "Recalls full content of a persistent memory by key or ID. Automatically logs the access event into MemoryAccessRecord for audit and liveness tracking.",
   schema: MemoryRecallSchema,
   execute: async ({
     key,
-    scope,
     workflow,
     workflowId: workflowIdArg,
     node,
     nodeId: nodeIdArg,
-    role,
-    roleId: roleIdArg,
+    id,
     accessedBy,
     executionId,
     taskId,
@@ -73,14 +64,11 @@ export const memoryRecallTool = defineTool({
       if (resolvedNode) nodeId = resolvedNode.id;
     }
 
-    const roleId = (role ?? roleIdArg)?.trim();
-
     const memory = await recallMemory({
+      id,
       key,
-      scope: scope as MemoryScope | undefined,
       workflowId,
       nodeId,
-      roleId,
       accessedBy,
       executionId,
       taskId,
@@ -88,7 +76,7 @@ export const memoryRecallTool = defineTool({
 
     if (!memory) {
       return createErrorResponse(
-        `Memory with key "${key}" not found${scope ? ` in scope "${scope}"` : ""}.`,
+        `Memory with key "${key}" not found${workflowId ? ` in workflow "${workflowId}"` : ""}.`,
       );
     }
 

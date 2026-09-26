@@ -30,10 +30,16 @@ export function getVisualizerClientScript(): string {
       let selectedNodeData = null;
       let nodesLocked = true;
       let autoRefreshActive = true;
+      let messages = rawData.messages || [];
+      let currentTab = 'inspector';
+      let msgFilterTask = '';
+      let msgFilterRole = '';
+      let msgFilterTopic = '';
 
       const STATUS_ICONS = {
         completed: '✅',
         running: '🔄',
+        waiting_for_children: '⏸️',
         pending: '⏳',
         failed: '❌',
         skipped: '⏭️'
@@ -42,10 +48,87 @@ export function getVisualizerClientScript(): string {
       const STATUS_COLORS = {
         completed: '#10b981',
         running: '#3b82f6',
+        waiting_for_children: '#818cf8',
         pending: '#f59e0b',
         failed: '#ef4444',
         skipped: '#64748b'
       };
+
+      function switchTab(tab) {
+        currentTab = tab;
+        const tabInspBtn = document.getElementById('tab-btn-inspector');
+        const tabMsgBtn = document.getElementById('tab-btn-messages');
+        const contentInsp = document.getElementById('tab-content-inspector');
+        const contentMsg = document.getElementById('tab-content-messages');
+
+        if (tab === 'inspector') {
+          if (tabInspBtn) tabInspBtn.classList.add('active');
+          if (tabMsgBtn) tabMsgBtn.classList.remove('active');
+          if (contentInsp) contentInsp.classList.add('active');
+          if (contentMsg) contentMsg.classList.remove('active');
+        } else {
+          if (tabInspBtn) tabInspBtn.classList.remove('active');
+          if (tabMsgBtn) tabMsgBtn.classList.add('active');
+          if (contentInsp) contentInsp.classList.remove('active');
+          if (contentMsg) contentMsg.classList.add('active');
+          renderMessages();
+        }
+      }
+
+      function renderMessages() {
+        const list = document.getElementById('msg-board-list');
+        const tabCount = document.getElementById('tab-msg-count');
+        const headerCount = document.getElementById('header-msg-count');
+        if (tabCount) tabCount.textContent = messages.length;
+        if (headerCount) headerCount.textContent = messages.length;
+        if (!list) return;
+
+        list.innerHTML = '';
+        const filtered = messages.filter(m => {
+          if (msgFilterTask && !(m.taskId || '').toLowerCase().includes(msgFilterTask.toLowerCase())) return false;
+          if (msgFilterRole && !(m.role || '').toLowerCase().includes(msgFilterRole.toLowerCase())) return false;
+          if (msgFilterTopic && !(m.topic || '').toLowerCase().includes(msgFilterTopic.toLowerCase())) return false;
+          return true;
+        });
+
+        if (filtered.length === 0) {
+          const empty = document.createElement('div');
+          empty.style.cssText = 'text-align: center; color: var(--text-muted); font-size: 0.8rem; font-style: italic; padding: 24px 0;';
+          empty.textContent = messages.length === 0
+            ? 'No messages recorded for this execution.'
+            : 'No messages match active filters.';
+          list.appendChild(empty);
+          return;
+        }
+
+        filtered.forEach(msg => {
+          const card = document.createElement('div');
+          card.className = 'msg-card';
+          card.setAttribute('data-task-id', msg.taskId || '');
+          card.setAttribute('data-role', msg.role || '');
+          card.setAttribute('data-topic', msg.topic || '');
+
+          const meta = document.createElement('div');
+          meta.className = 'msg-meta';
+
+          let badgesHtml = '<span class="msg-author">' + escapeHtml(msg.author) + '</span>';
+          if (msg.role) badgesHtml += '<span class="badge" style="background: #312e81; color: #a5b4fc; font-size: 0.68rem;">@' + escapeHtml(msg.role) + '</span>';
+          if (msg.topic) badgesHtml += '<span class="badge" style="background: #0c4a6e; color: #7dd3fc; font-size: 0.68rem;">#' + escapeHtml(msg.topic) + '</span>';
+          if (msg.taskId) badgesHtml += '<span class="badge" style="background: #581c87; color: #d8b4fe; font-size: 0.68rem;">📋 ' + escapeHtml(msg.taskId) + '</span>';
+
+          const timeStr = msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString() : '';
+          meta.innerHTML = '<div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">' + badgesHtml + '</div>' +
+            '<span style="color: var(--text-muted); font-size: 0.7rem;">' + timeStr + '</span>';
+
+          const content = document.createElement('div');
+          content.className = 'msg-content';
+          content.textContent = msg.content;
+
+          card.appendChild(meta);
+          card.appendChild(content);
+          list.appendChild(card);
+        });
+      }
 
       const NODE_SHAPES = {
         start: 'round-rectangle',
@@ -139,6 +222,7 @@ export function getVisualizerClientScript(): string {
         const inspector = document.getElementById('inspector');
         if (!inspector) return;
         inspector.classList.remove('hidden');
+        switchTab('inspector');
 
         const nameEl = document.getElementById('insp-name');
         if (nameEl) nameEl.textContent = nodeData.name || 'Unnamed Node';
@@ -153,9 +237,25 @@ export function getVisualizerClientScript(): string {
           statusBadge.className = 'badge badge-status-' + st;
         }
 
+        const barrierBadge = document.getElementById('insp-barrier-badge');
+        if (barrierBadge) {
+          if (nodeData.joinPolicy) {
+            barrierBadge.style.display = 'inline-block';
+            barrierBadge.textContent = '🛡️ Barrier: ' + nodeData.joinPolicy + (nodeData.joinPolicy === 'm_of_n' && nodeData.joinThreshold ? ' (' + nodeData.joinThreshold + ')' : '');
+          } else {
+            barrierBadge.style.display = 'none';
+          }
+        }
+
         const subagentBadge = document.getElementById('insp-subagent-badge');
         if (subagentBadge) {
           subagentBadge.style.display = nodeData.runInSubAgent ? 'inline-block' : 'none';
+        }
+
+        const subworkflowBadge = document.getElementById('insp-subworkflow-badge');
+        if (subworkflowBadge) {
+          const isSub = nodeData.type === 'subworkflow' || Boolean(nodeData.config?.childWorkflowId);
+          subworkflowBadge.style.display = isSub ? 'inline-block' : 'none';
         }
 
         const promptEl = document.getElementById('insp-prompt');
@@ -165,14 +265,67 @@ export function getVisualizerClientScript(): string {
 
         const subActionWrap = document.getElementById('insp-subworkflow-action');
         if (subActionWrap) {
-          if (nodeData.type === 'subworkflow' && nodeData.config?.childWorkflowId) {
+          const childWfId = nodeData.config?.childWorkflowId || nodeData.subworkflowId;
+          if (nodeData.type === 'subworkflow' && childWfId) {
             subActionWrap.style.display = 'block';
             const drillBtn = document.getElementById('insp-drilldown-btn');
             if (drillBtn) {
-              drillBtn.onclick = () => drillDownIntoSubworkflow(nodeData.config.childWorkflowId);
+              drillBtn.onclick = () => drillDownIntoSubworkflow(childWfId);
             }
           } else {
             subActionWrap.style.display = 'none';
+          }
+        }
+
+        // Decision Rules Card
+        const decCard = document.getElementById('insp-decision-rules-card');
+        const decContent = document.getElementById('insp-decision-rules-content');
+        const decField = document.getElementById('insp-decision-field');
+        if (decCard && decContent) {
+          const cfg = nodeData.config || {};
+          const isDec = nodeData.type === 'decision' || Boolean(cfg.field || cfg.map || cfg.numericRules || cfg.default);
+          if (isDec) {
+            decCard.style.display = 'block';
+            if (decField) decField.textContent = cfg.field ? 'field: ' + cfg.field : '';
+            decContent.innerHTML = '';
+            if (cfg.map && typeof cfg.map === 'object') {
+              const mapTitle = document.createElement('div');
+              mapTitle.style.cssText = 'font-weight: 600; color: #cbd5e1; font-size: 0.78rem;';
+              mapTitle.textContent = 'Discrete Value Map:';
+              decContent.appendChild(mapTitle);
+              const list = document.createElement('div');
+              list.style.cssText = 'display: flex; flex-direction: column; gap: 3px; font-family: monospace; font-size: 0.75rem;';
+              for (const [val, cond] of Object.entries(cfg.map)) {
+                const row = document.createElement('div');
+                row.style.cssText = 'display: flex; justify-content: space-between; background: #0f172a; padding: 2px 6px; border-radius: 4px;';
+                row.innerHTML = '<span style="color: #93c5fd;">' + escapeHtml(val) + '</span><span style="color: #64748b;">&rarr;</span><span style="color: #34d399; font-weight: 600;">' + escapeHtml(cond) + '</span>';
+                list.appendChild(row);
+              }
+              decContent.appendChild(list);
+            }
+            if (Array.isArray(cfg.numericRules) && cfg.numericRules.length > 0) {
+              const numTitle = document.createElement('div');
+              numTitle.style.cssText = 'font-weight: 600; color: #cbd5e1; font-size: 0.78rem; margin-top: 4px;';
+              numTitle.textContent = 'Numeric Comparison Rules:';
+              decContent.appendChild(numTitle);
+              const numList = document.createElement('div');
+              numList.style.cssText = 'display: flex; flex-direction: column; gap: 3px; font-family: monospace; font-size: 0.75rem;';
+              cfg.numericRules.forEach(r => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display: flex; justify-content: space-between; background: #0f172a; padding: 2px 6px; border-radius: 4px;';
+                row.innerHTML = '<span>val <span style="color: #f59e0b;">' + escapeHtml(r.op) + ' ' + r.value + '</span></span><span style="color: #64748b;">&rarr;</span><span style="color: #34d399; font-weight: 600;">' + escapeHtml(r.condition) + '</span>';
+                numList.appendChild(row);
+              });
+              decContent.appendChild(numList);
+            }
+            if (cfg.default) {
+              const defDiv = document.createElement('div');
+              defDiv.style.cssText = 'font-size: 0.75rem; color: #94a3b8; margin-top: 4px; border-top: 1px solid #1e293b; padding-top: 4px; display: flex; justify-content: space-between;';
+              defDiv.innerHTML = '<span>Default Fallback:</span><code style="color: #38bdf8;">' + escapeHtml(cfg.default) + '</code>';
+              decContent.appendChild(defDiv);
+            }
+          } else {
+            decCard.style.display = 'none';
           }
         }
 
@@ -273,7 +426,8 @@ export function getVisualizerClientScript(): string {
           const icon = STATUS_ICONS[n.status] || '⏳';
           const iterSuffix = n.iteration && n.iteration > 1 ? ' (i:' + n.iteration + ')' : '';
           const subBadge = n.type === 'subworkflow' ? ' 📦' : n.type === 'user_interaction' ? ' 👤' : '';
-          const displayLabel = icon + ' ' + n.name + subBadge + iterSuffix;
+          const barrierBadge = n.joinPolicy ? (' 🛡️' + (n.joinPolicy === 'm_of_n' && n.joinThreshold ? '(' + n.joinThreshold + ')' : '')) : '';
+          const displayLabel = icon + ' ' + n.name + barrierBadge + subBadge + iterSuffix;
 
           elements.push({
             group: 'nodes',
@@ -643,6 +797,47 @@ export function getVisualizerClientScript(): string {
         };
       }
 
+      // Tab switcher event listeners
+      const tabInspBtn = document.getElementById('tab-btn-inspector');
+      if (tabInspBtn) tabInspBtn.onclick = () => switchTab('inspector');
+
+      const tabMsgBtn = document.getElementById('tab-btn-messages');
+      if (tabMsgBtn) tabMsgBtn.onclick = () => switchTab('messages');
+
+      const msgBoardBtn = document.getElementById('msg-board-btn');
+      if (msgBoardBtn) {
+        msgBoardBtn.onclick = () => {
+          const inspector = document.getElementById('inspector');
+          if (inspector) inspector.classList.remove('hidden');
+          switchTab('messages');
+        };
+      }
+
+      // Message Board filter listeners
+      const msgFilterTaskInput = document.getElementById('msg-filter-task');
+      if (msgFilterTaskInput) {
+        msgFilterTaskInput.oninput = (e) => {
+          msgFilterTask = e.target.value.trim();
+          renderMessages();
+        };
+      }
+
+      const msgFilterRoleInput = document.getElementById('msg-filter-role');
+      if (msgFilterRoleInput) {
+        msgFilterRoleInput.oninput = (e) => {
+          msgFilterRole = e.target.value.trim();
+          renderMessages();
+        };
+      }
+
+      const msgFilterTopicInput = document.getElementById('msg-filter-topic');
+      if (msgFilterTopicInput) {
+        msgFilterTopicInput.oninput = (e) => {
+          msgFilterTopic = e.target.value.trim();
+          renderMessages();
+        };
+      }
+
       // Auto-refresh polling
       setInterval(async () => {
         if (!autoRefreshActive) return;
@@ -651,6 +846,10 @@ export function getVisualizerClientScript(): string {
           const res = await fetch(endpoint);
           if (!res.ok) return;
           const fresh = await res.json();
+          if (fresh.messages) {
+            messages = fresh.messages;
+            renderMessages();
+          }
           if (fresh.workflow) {
             workflows[currentWorkflowId] = fresh.workflow;
             fresh.workflow.nodes.forEach(n => {
@@ -662,7 +861,8 @@ export function getVisualizerClientScript(): string {
                   const icon = STATUS_ICONS[n.status] || '⏳';
                   const iterSuffix = n.iteration && n.iteration > 1 ? ' (i:' + n.iteration + ')' : '';
                   const subBadge = n.type === 'subworkflow' ? ' 📦' : n.type === 'user_interaction' ? ' 👤' : '';
-                  nodeEl.data('label', icon + ' ' + n.name + subBadge + iterSuffix);
+                  const barrierBadge = n.joinPolicy ? (' 🛡️' + (n.joinPolicy === 'm_of_n' && n.joinThreshold ? '(' + n.joinThreshold + ')' : '')) : '';
+                  nodeEl.data('label', icon + ' ' + n.name + barrierBadge + subBadge + iterSuffix);
                 }
               }
             });
@@ -677,6 +877,7 @@ export function getVisualizerClientScript(): string {
       }, 2500);
 
       // Initial Render
+      renderMessages();
       renderCurrentWorkflow();
     })();
   `;

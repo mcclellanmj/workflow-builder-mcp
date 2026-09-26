@@ -61,12 +61,13 @@ Deno.test("Node tools lifecycle and edge cases test", async () => {
       type: "decision",
       name: "Decision 1",
       description: "Check condition",
-      config: { options: ["yes", "no"] },
+      config: { field: "choice", default: "no", map: { "yes": "yes" } },
     });
     assert(!addDecisionRes.isError);
     const decisionNode = JSON.parse(addDecisionRes.content[0].text);
     assertEquals(decisionNode.type, "decision");
-    assertEquals(decisionNode.config.options, ["yes", "no"]);
+    assertEquals(decisionNode.config.field, "choice");
+    assertEquals(decisionNode.config.default, "no");
 
     // 6. Add end node
     const addEndRes = await addNodeTool.execute({
