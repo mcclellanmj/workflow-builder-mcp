@@ -14,3 +14,4 @@ export * from "./tasks.ts";
 export * from "./roles.ts";
 export * from "./memories.ts";
 export * from "./handoffs.ts";
+export * from "./admin_reset.ts";
