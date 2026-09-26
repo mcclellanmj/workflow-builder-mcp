@@ -5,7 +5,9 @@
  */
 
 import { safeGetEnv } from "../../env.ts";
+import { invalidateWorkflowCache } from "../resolvers.ts";
 import { getKv } from "./client.ts";
+import { clearRoleCache } from "./roles.ts";
 
 // Top-level prefixes belonging strictly to workflow-builder-mcp
 export const WORKFLOW_MCP_PREFIXES: Deno.KvKey[] = [
@@ -17,14 +19,21 @@ export const WORKFLOW_MCP_PREFIXES: Deno.KvKey[] = [
   ["memories_by_workflow"],
   ["memories_by_node"],
   ["memories_by_task"],
+  ["memories_by_role"],
+  ["memory_keys"],
   ["memory_accesses"],
+  ["memory_access_log"],
   ["roles"],
   ["roles_by_name"],
+  ["role_journals"],
   ["handoffs"],
   ["handoffs_by_task"],
   ["view_tickets"],
+  ["closedTasks"],
+  ["task_deps"],
+  ["task_deps_rev"],
   ["pipeline_templates"], // legacy
-  ["journals"],           // legacy
+  ["journals"], // legacy
 ];
 
 // App-specific subkeys under ["users", userId, ...]
@@ -32,9 +41,12 @@ export const WORKFLOW_USER_SUBKEYS = new Set([
   "workflows",
   "nodes",
   "edges",
+  "subworkflow_refs",
+  "subworkflow_refs_indexed",
   "executions",
   "executions_by_workflow",
   "tasks",
+  "closedTasks",
   "tasks_by_status",
   "tasks_by_assignee",
   "tasks_by_role",
@@ -45,12 +57,26 @@ export const WORKFLOW_USER_SUBKEYS = new Set([
   "tasks_by_assigned_workflow",
   "tasks_by_parent",
   "parent_children",
+  "task_deps",
+  "task_deps_rev",
   "task_dependencies",
   "task_dependents",
+  "memories",
+  "memory_keys",
+  "memories_by_workflow",
+  "memories_by_node",
+  "memories_by_task",
+  "memories_by_role",
+  "memory_access_log",
+  "memory_accesses",
   "roles",
+  "roles_by_name",
+  "role_journals",
   "handoffs",
   "view_tickets",
   "cache",
+  "pipeline_templates",
+  "journals",
 ]);
 
 export interface PurgeResult {
@@ -64,6 +90,14 @@ export interface PurgeResult {
 export async function purgeWorkflowMcpData(kv: Deno.Kv): Promise<PurgeResult> {
   let count = 0;
   const prefixesPurged: string[] = [];
+
+  // Clear in-memory caches
+  try {
+    clearRoleCache();
+    invalidateWorkflowCache();
+  } catch {
+    // Ignore cache clear failures in non-standard environments
+  }
 
   // 1. Delete top-level workflow prefixes
   for (const prefix of WORKFLOW_MCP_PREFIXES) {
@@ -95,6 +129,13 @@ export async function purgeWorkflowMcpData(kv: Deno.Kv): Promise<PurgeResult> {
 let _startupResetChecked = false;
 
 /**
+ * Reset startup check flag (primarily for unit tests).
+ */
+export function resetStartupCheckForTesting(): void {
+  _startupResetChecked = false;
+}
+
+/**
  * Checks for RESET_WORKFLOW_DATA_ONCE environment variable on startup.
  * If present and not previously executed, safely purges workflow-builder-mcp data once.
  * Other applications sharing the same KV database are strictly preserved.
@@ -104,19 +145,23 @@ export async function checkAndPerformStartupReset(): Promise<void> {
   _startupResetChecked = true;
 
   const flag = safeGetEnv("RESET_WORKFLOW_DATA_ONCE");
-  if (!flag || (flag !== "1" && flag !== "force")) {
+  if (!flag) {
+    return;
+  }
+  const cleanFlag = flag.trim().toLowerCase();
+  if (cleanFlag !== "1" && cleanFlag !== "true" && cleanFlag !== "force") {
     return;
   }
 
   try {
     const kv = await getKv();
-    const isForce = flag === "force";
+    const isForce = cleanFlag === "force";
 
     if (!isForce) {
-      const marker = await kv.get<boolean>(["workflow_system", "reset_done"]);
+      const marker = await kv.get<boolean>(["workflow_system", "reset_done_v2"]);
       if (marker.value) {
         console.log(
-          "[WORKFLOW_MCP] RESET_WORKFLOW_DATA_ONCE=1 detected, but reset was already completed previously. Skipping.",
+          "[WORKFLOW_MCP] RESET_WORKFLOW_DATA_ONCE detected, but reset was already completed previously. Skipping.",
         );
         return;
       }
@@ -126,6 +171,7 @@ export async function checkAndPerformStartupReset(): Promise<void> {
       "[WORKFLOW_MCP] RESET_WORKFLOW_DATA_ONCE detected. Starting one-time safe purge of workflow-builder-mcp data...",
     );
     const result = await purgeWorkflowMcpData(kv);
+    await kv.set(["workflow_system", "reset_done_v2"], true);
     await kv.set(["workflow_system", "reset_done"], true);
 
     console.log(
@@ -142,4 +188,3 @@ export async function checkAndPerformStartupReset(): Promise<void> {
     console.error(`[WORKFLOW_MCP] ❌ Failed to execute startup reset: ${msg}`);
   }
 }
-
